@@ -1,0 +1,16 @@
+{
+  "pages": [
+    {
+      "path": "pages/game/index",
+      "style": {
+        "navigationBarTitleText": "四块拼图",
+        "navigationStyle": "custom"
+      }
+    }
+  ],
+  "globalStyle": {
+    "backgroundColor": "#f4f1ea",
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "四块拼图"
+  }
+}

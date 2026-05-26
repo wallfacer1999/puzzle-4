@@ -1,0 +1,26 @@
+{
+  "name": "四块拼图",
+  "appid": "__UNI__PUZZLE4",
+  "description": "四块板拼成 T 字的跨端拼图游戏",
+  "versionName": "0.1.0",
+  "versionCode": "1",
+  "transformPx": false,
+  "app-plus": {},
+  "h5": {
+    "title": "四块拼图",
+    "router": {
+      "mode": "hash"
+    }
+  },
+  "mp-weixin": {
+    "appid": "",
+    "setting": {
+      "urlCheck": false
+    },
+    "usingComponents": true
+  },
+  "mp-toutiao": {
+    "appid": "",
+    "usingComponents": true
+  }
+}
