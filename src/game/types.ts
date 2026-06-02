@@ -15,6 +15,8 @@ export interface PieceTemplate {
   width: number;
   height: number;
   color: string;
+  texture: boolean;
+  textureUrl?: string;
   polygon: string;
   vertices: Point[];
   actionCenter: Point;
@@ -45,7 +47,9 @@ export interface SolveTolerance {
   outsideAreaRatio: number;
   overlapAreaRatio: number;
   uncoveredAreaRatio: number;
+  targetMismatchRatio: number;
   areaSampleStep: number;
+  translationSearchRadius: number;
 }
 
 export interface AreaSolveSummary {
@@ -53,6 +57,8 @@ export interface AreaSolveSummary {
   outsideAreaRatio: number;
   overlapAreaRatio: number;
   uncoveredAreaRatio: number;
+  targetMismatchRatio: number;
+  bestOffset: Point;
 }
 
 export interface PieceSolveIssue {
@@ -66,6 +72,8 @@ export interface PieceSolveIssue {
 export interface LevelConfig {
   id: string;
   name: string;
+  difficulty: 'normal' | 'easy';
+  showTarget: boolean;
   boardWidth: number;
   boardHeight: number;
   timeLimitSeconds: number;

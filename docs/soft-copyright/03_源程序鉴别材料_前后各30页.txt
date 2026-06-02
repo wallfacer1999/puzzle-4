@@ -1,0 +1,3179 @@
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 1 页 / 共 60 页
+
+0001  // ===== src/App.vue =====
+0002  <template>
+0003    <slot />
+0004  </template>
+0005  
+0006  <script setup lang="ts"></script>
+0007  
+0008  <style>
+0009  page,
+0010  body {
+0011    min-height: 100%;
+0012    margin: 0;
+0013    background: #f4f1ea;
+0014    color: #1d2433;
+0015    font-family:
+0016      -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+0017  }
+0018  
+0019  view,
+0020  text {
+0021    box-sizing: border-box;
+0022  }
+0023  </style>
+0024  
+0025  // ===== src/main.ts =====
+0026  import { createSSRApp } from 'vue';
+0027  import App from './App.vue';
+0028  
+0029  export function createApp() {
+0030    const app = createSSRApp(App);
+0031    return {
+0032      app,
+0033    };
+0034  }
+0035  
+0036  // ===== src/pages.json =====
+0037  {
+0038    "pages": [
+0039      {
+0040        "path": "pages/game/index",
+0041        "style": {
+0042          "navigationBarTitleText": "四块拼图",
+0043          "navigationStyle": "custom"
+0044        }
+0045      }
+0046    ],
+0047    "subPackages": [],
+0048    "globalStyle": {
+0049      "backgroundColor": "#f4f1ea",
+0050      "navigationBarTextStyle": "black",
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 2 页 / 共 60 页
+
+0051      "navigationBarTitleText": "四块拼图"
+0052    }
+0053  }
+0054  
+0055  // ===== src/manifest.json =====
+0056  {
+0057    "name": "四块拼图",
+0058    "appid": "__UNI__PUZZLE4",
+0059    "description": "四块板拼成 T 字的跨端拼图游戏",
+0060    "versionName": "0.1.0",
+0061    "versionCode": "1",
+0062    "transformPx": false,
+0063    "app-plus": {},
+0064    "h5": {
+0065      "title": "四块拼图",
+0066      "router": {
+0067        "mode": "hash"
+0068      }
+0069    },
+0070    "mp-weixin": {
+0071      "appid": "wx434da7d906a6fa7b",
+0072      "setting": {
+0073        "urlCheck": false
+0074      },
+0075      "usingComponents": true
+0076    },
+0077    "mp-toutiao": {
+0078      "appid": "",
+0079      "usingComponents": true
+0080    }
+0081  }
+0082  
+0083  // ===== src/pages/game/index.vue =====
+0084  <template>
+0085    <view class="page" :style="pageStyle">
+0086      <view class="header">
+0087        <view class="brand">
+0088          <text class="logo">T</text>
+0089          <text class="title">字拼图</text>
+0090        </view>
+0091        <text v-if="level.difficulty === 'easy'" class="mode-badge">简单版</text>
+0092      </view>
+0093  
+0094      <GameToolbar
+0095        class="toolbar"
+0096        :remaining-seconds="remainingSeconds"
+0097        :status="status"
+0098        :countdown-enabled="level.countdownEnabled"
+0099      />
+0100  
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 3 页 / 共 60 页
+
+0101      <view class="play-area">
+0102        <PuzzleBoard
+0103          :pieces="pieces"
+0104          :targets="level.targets"
+0105          :show-target="level.showTarget"
+0106          :board-size="{ width: level.boardWidth, height: level.boardHeight }"
+0107          :active-piece-id="activePieceId"
+0108          :disabled="phase !== 'playing' || status !== 'playing' || resultModalVisible"
+0109          :animate-layout="boardAnimating"
+0110          :music-enabled="musicEnabled"
+0111          :show-controls="phase === 'guide' && guideStep !== 'done'"
+0112          :guide-piece-id="guidePieceId"
+0113          :guide-step="guideStep"
+0114          @piece-activate="activatePiece"
+0115          @piece-move="movePiece"
+0116          @piece-rotate="rotatePiece"
+0117          @piece-flip="(id, hingeX) => flipPiece(id, hingeX)"
+0118          @piece-gesture-end="checkAfterPieceOperation"
+0119          @toggle-music="toggleMusic"
+0120        />
+0121        <view v-if="toastMessage" class="toast">
+0122          <text>{{ toastMessage }}</text>
+0123        </view>
+0124        <view v-if="showDebugMetrics && phase === 'playing'" class="debug-metrics">
+0125          <text>遮挡 {{ debugMetrics.overlap }} / {{ debugMetrics.overlapLimit }}%</text>
+0126          <text>覆盖 {{ debugMetrics.coverage }}%</text>
+0127          <text>超出 {{ debugMetrics.outside }} / {{ debugMetrics.outsideLimit }}%</text>
+0128          <text>空缺 {{ debugMetrics.uncovered }} / {{ debugMetrics.uncoveredLimit }}%</text>
+0129          <text>偏差 {{ debugMetrics.mismatch }} / {{ debugMetrics.mismatchLimit }}%</text>
+0130        </view>
+0131        <view v-if="phase === 'preview'" class="start-panel">
+0132          <text class="start-title">准备挑战</text>
+0133          <text class="start-copy">打散后开始计时，拼回刚才的 T 字</text>
+0134          <view class="tips">
+0135            <view class="tip-row">
+0136              <text class="tip-icon">⇆</text>
+0137              <text>按住木块拖动</text>
+0138            </view>
+0139            <view class="tip-row">
+0140              <text class="tip-icon">⇵</text>
+0141              <text>轻点木块翻面</text>
+0142            </view>
+0143            <view class="tip-row">
+0144              <text class="tip-icon rotate-tip-icon">⟳</text>
+0145              <text>按住顶点旋转</text>
+0146            </view>
+0147          </view>
+0148          <button class="start-button" hover-class="button-hover" @tap="startGameWithMusic">开始挑战</button>
+0149          <view class="secondary-actions">
+0150            <button class="secondary-button" hover-class="button-hover" @tap="replayGuide">重看教学</button>
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 4 页 / 共 60 页
+
+0151            <button class="secondary-button" hover-class="button-hover" @tap="startGameMuted">静音开始</button>
+0152          </view>
+0153        </view>
+0154        <view v-if="phase === 'guide' && guideStep !== 'done'" class="operation-hint">
+0155          <text class="hint-icon">{{ guideIcon }}</text>
+0156          <text>{{ guideText }}</text>
+0157        </view>
+0158      </view>
+0159  
+0160      <ResultModal
+0161        :visible="resultModalVisible"
+0162        :status="status"
+0163        :elapsed-seconds="elapsedSeconds"
+0164        :can-lower-difficulty="level.difficulty !== 'easy'"
+0165        @restart="restartGame"
+0166        @lower-difficulty="lowerDifficulty"
+0167        @share="shareGame"
+0168      />
+0169    </view>
+0170  </template>
+0171  
+0172  <script setup lang="ts">
+0173  import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+0174  import { onShareAppMessage } from '@dcloudio/uni-app';
+0175  import GameToolbar from '@/components/GameToolbar.vue';
+0176  import PuzzleBoard from '@/components/PuzzleBoard.vue';
+0177  import ResultModal from '@/components/ResultModal.vue';
+0178  import { usePuzzleGame } from '@/composables/usePuzzleGame';
+0179  import { easyLevel, normalLevel } from '@/game/levels';
+0180  import { getAreaSolveSummary } from '@/game/rules';
+0181  
+0182  const level = ref(normalLevel);
+0183  const phase = ref<'preview' | 'guide' | 'scattering' | 'playing'>('guide');
+0184  const guideStep = ref<'drag' | 'flip' | 'rotate' | 'done'>('drag');
+0185  const boardAnimating = ref(false);
+0186  const musicEnabled = ref(false);
+0187  const debugMetrics = ref({
+0188    overlap: '0.0',
+0189    overlapLimit: '0.0',
+0190    coverage: '0.0',
+0191    outside: '0.0',
+0192    outsideLimit: '0.0',
+0193    uncovered: '0.0',
+0194    uncoveredLimit: '0.0',
+0195    mismatch: '0.0',
+0196    mismatchLimit: '0.0',
+0197  });
+0198  const systemInfo = uni.getSystemInfoSync();
+0199  const safeTop = systemInfo.safeAreaInsets?.top ?? 28;
+0200  let hintTimers: ReturnType<typeof setTimeout>[] = [];
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 5 页 / 共 60 页
+
+0201  let boardAnimationTimer: ReturnType<typeof setTimeout> | undefined;
+0202  let bgm: UniApp.InnerAudioContext | undefined;
+0203  let successSound: UniApp.InnerAudioContext | undefined;
+0204  let failSound: UniApp.InnerAudioContext | undefined;
+0205  let bgmMode: 'normal' | 'fast' = 'normal';
+0206  const urgentSeconds = 20;
+0207  
+0208  const {
+0209    pieces,
+0210    status,
+0211    remainingSeconds,
+0212    elapsedSeconds,
+0213    activePieceId,
+0214    resultModalVisible,
+0215    toastMessage,
+0216    showToast,
+0217    showSolvedPreview,
+0218    startGame,
+0219    beginCountdown,
+0220    switchLevel,
+0221    activatePiece,
+0222    deactivatePiece,
+0223    movePiece,
+0224    rotatePiece,
+0225    snapPieceRotation,
+0226    flipPiece,
+0227    checkSolved,
+0228  } = usePuzzleGame(level);
+0229  
+0230  const showDebugMetrics = false;
+0231  const guidePieceId = computed(() => pieces.value.find((piece) => piece.id === 'piece-b')?.id ?? '');
+0232  
+0233  const pageStyle = computed(() => ({
+0234    paddingTop: `${safeTop + 18}px`,
+0235  }));
+0236  
+0237  const guideText = computed(() => {
+0238    if (guideStep.value === 'drag') {
+0239      return '按住木块，拖到想放的位置';
+0240    }
+0241    if (guideStep.value === 'flip') {
+0242      return '轻点木块，可以翻到另一面';
+0243    }
+0244    if (guideStep.value === 'rotate') {
+0245      return '按住任意角旋转';
+0246    }
+0247    return '';
+0248  });
+0249  
+0250  const guideIcon = computed(() => {
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 6 页 / 共 60 页
+
+0251    if (guideStep.value === 'drag') {
+0252      return '⇆';
+0253    }
+0254    if (guideStep.value === 'flip') {
+0255      return '⇵';
+0256    }
+0257    if (guideStep.value === 'rotate') {
+0258      return '⟳';
+0259    }
+0260    return '';
+0261  });
+0262  
+0263  function playGuideThenShowStart() {
+0264    phase.value = 'guide';
+0265    guideStep.value = 'drag';
+0266    clearGuideTimers();
+0267    hintTimers = [
+0268      setTimeout(() => {
+0269        guideStep.value = 'flip';
+0270      }, 2400),
+0271      setTimeout(() => {
+0272        guideStep.value = 'rotate';
+0273      }, 4800),
+0274      setTimeout(() => {
+0275        guideStep.value = 'done';
+0276        phase.value = 'preview';
+0277      }, 7200),
+0278    ];
+0279  }
+0280  
+0281  function scatterAndStartGame() {
+0282    clearGuideTimers();
+0283    guideStep.value = 'done';
+0284    phase.value = 'scattering';
+0285    boardAnimating.value = true;
+0286    startGame({ startTimers: false });
+0287    if (boardAnimationTimer) {
+0288      clearTimeout(boardAnimationTimer);
+0289    }
+0290    boardAnimationTimer = setTimeout(() => {
+0291      boardAnimating.value = false;
+0292      phase.value = 'playing';
+0293      updateDebugMetrics();
+0294      beginCountdown();
+0295    }, 680);
+0296  }
+0297  
+0298  function updateDebugMetrics() {
+0299    const summary = getAreaSolveSummary(pieces.value, level.value.targets, level.value.tolerance);
+0300    const tolerance = level.value.tolerance;
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 7 页 / 共 60 页
+
+0301    debugMetrics.value = {
+0302      overlap: (summary.overlapAreaRatio * 100).toFixed(1),
+0303      overlapLimit: (tolerance.overlapAreaRatio * 100).toFixed(1),
+0304      coverage: ((1 - summary.targetMismatchRatio) * 100).toFixed(1),
+0305      outside: (summary.outsideAreaRatio * 100).toFixed(1),
+0306      outsideLimit: (tolerance.outsideAreaRatio * 100).toFixed(1),
+0307      uncovered: (summary.uncoveredAreaRatio * 100).toFixed(1),
+0308      uncoveredLimit: (tolerance.uncoveredAreaRatio * 100).toFixed(1),
+0309      mismatch: (summary.targetMismatchRatio * 100).toFixed(1),
+0310      mismatchLimit: (tolerance.targetMismatchRatio * 100).toFixed(1),
+0311    };
+0312    return summary;
+0313  }
+0314  
+0315  function checkAfterPieceOperation(pieceId?: string) {
+0316    if (pieceId) {
+0317      snapPieceRotation(pieceId);
+0318    }
+0319    if (phase.value !== 'playing' || status.value !== 'playing') {
+0320      deactivatePiece();
+0321      return;
+0322    }
+0323    updateDebugMetrics();
+0324    checkSolved({ silent: true });
+0325    deactivatePiece();
+0326  }
+0327  
+0328  function clearGuideTimers() {
+0329    hintTimers.forEach((timer) => clearTimeout(timer));
+0330    hintTimers = [];
+0331  }
+0332  
+0333  function restartGame() {
+0334    clearGuideTimers();
+0335    if (boardAnimationTimer) {
+0336      clearTimeout(boardAnimationTimer);
+0337      boardAnimationTimer = undefined;
+0338    }
+0339    boardAnimating.value = false;
+0340    phase.value = 'guide';
+0341    showSolvedPreview();
+0342    playGuideThenShowStart();
+0343  }
+0344  
+0345  function startGameWithMusic() {
+0346    musicEnabled.value = true;
+0347    showSolvedPreview();
+0348    playBgm();
+0349    scatterAndStartGame();
+0350  }
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 8 页 / 共 60 页
+
+0351  
+0352  function startGameMuted() {
+0353    musicEnabled.value = false;
+0354    stopBgm();
+0355    showSolvedPreview();
+0356    scatterAndStartGame();
+0357  }
+0358  
+0359  function replayGuide() {
+0360    showSolvedPreview();
+0361    playGuideThenShowStart();
+0362  }
+0363  
+0364  function lowerDifficulty() {
+0365    switchLevel(easyLevel);
+0366    phase.value = 'guide';
+0367    playGuideThenShowStart();
+0368  }
+0369  
+0370  function shareGame() {
+0371    showToast('点击右上角菜单分享给朋友试试');
+0372  }
+0373  
+0374  function toggleMusic() {
+0375    musicEnabled.value = !musicEnabled.value;
+0376    if (musicEnabled.value) {
+0377      playBgm();
+0378    } else {
+0379      stopBgm();
+0380    }
+0381    showToast(musicEnabled.value ? '音乐已开启' : '音乐已关闭');
+0382  }
+0383  
+0384  function ensureBgm() {
+0385    if (bgm) {
+0386      return bgm;
+0387    }
+0388    bgm = uni.createInnerAudioContext();
+0389    bgm.loop = true;
+0390    bgm.volume = 0.34;
+0391    setBgmMode(remainingSeconds.value <= urgentSeconds ? 'fast' : 'normal');
+0392    return bgm;
+0393  }
+0394  
+0395  function setBgmMode(mode: 'normal' | 'fast') {
+0396    const sound = ensureBgm();
+0397    if (bgmMode === mode && sound.src) {
+0398      return;
+0399    }
+0400    const wasPlaying = musicEnabled.value && phase.value === 'playing';
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 9 页 / 共 60 页
+
+0401    bgmMode = mode;
+0402    sound.stop();
+0403    sound.src = mode === 'fast' ? '/static/audio/bgm-fast.mp3' : '/static/audio/bgm.mp3';
+0404    if (wasPlaying) {
+0405      sound.play();
+0406    }
+0407  }
+0408  
+0409  function createSound(src: string, volume: number) {
+0410    const sound = uni.createInnerAudioContext();
+0411    sound.src = src;
+0412    sound.volume = volume;
+0413    return sound;
+0414  }
+0415  
+0416  function ensureSuccessSound() {
+0417    successSound ??= createSound('/static/audio/success.mp3', 0.5);
+0418    return successSound;
+0419  }
+0420  
+0421  function ensureFailSound() {
+0422    failSound ??= createSound('/static/audio/fail.mp3', 0.44);
+0423    return failSound;
+0424  }
+0425  
+0426  function playOneShot(sound: UniApp.InnerAudioContext) {
+0427    sound.stop();
+0428    sound.seek(0);
+0429    sound.play();
+0430  }
+0431  
+0432  function playBgm() {
+0433    if (!musicEnabled.value) {
+0434      return;
+0435    }
+0436    setBgmMode(phase.value === 'playing' && remainingSeconds.value <= urgentSeconds ? 'fast' : 'normal');
+0437    ensureBgm().play();
+0438  }
+0439  
+0440  function stopBgm() {
+0441    bgm?.pause();
+0442  }
+0443  
+0444  onShareAppMessage(() => ({
+0445    title: 'T字拼图，来试试你能不能拼出来',
+0446    path: '/pages/game/index',
+0447  }));
+0448  
+0449  onMounted(() => {
+0450    playGuideThenShowStart();
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 10 页 / 共 60 页
+
+0451  });
+0452  
+0453  watch(status, (nextStatus) => {
+0454    if (nextStatus === 'success' || nextStatus === 'failed') {
+0455      const shouldPlayResultSound = musicEnabled.value;
+0456      musicEnabled.value = false;
+0457      stopBgm();
+0458      if (shouldPlayResultSound) {
+0459        playOneShot(nextStatus === 'success' ? ensureSuccessSound() : ensureFailSound());
+0460      }
+0461    }
+0462  });
+0463  
+0464  watch(remainingSeconds, (seconds) => {
+0465    if (phase.value === 'playing' && musicEnabled.value) {
+0466      setBgmMode(seconds > 0 && seconds <= urgentSeconds ? 'fast' : 'normal');
+0467    }
+0468  });
+0469  
+0470  onBeforeUnmount(() => {
+0471    clearGuideTimers();
+0472    if (boardAnimationTimer) {
+0473      clearTimeout(boardAnimationTimer);
+0474    }
+0475    bgm?.destroy();
+0476    successSound?.destroy();
+0477    failSound?.destroy();
+0478  });
+0479  </script>
+0480  
+0481  <style scoped>
+0482  .page {
+0483    display: flex;
+0484    flex-direction: column;
+0485    min-height: 100vh;
+0486    padding-right: 20px;
+0487    padding-bottom: calc(14px + env(safe-area-inset-bottom));
+0488    padding-left: 20px;
+0489    overflow: hidden;
+0490    background:
+0491      radial-gradient(circle at 18% 12%, rgba(255, 229, 89, 0.36), transparent 22%),
+0492      radial-gradient(circle at 88% 8%, rgba(92, 187, 255, 0.32), transparent 24%),
+0493      linear-gradient(135deg, #fff5cf 0%, #f4d58d 44%, #a8d6cf 100%);
+0494  }
+0495  
+0496  .header {
+0497    position: relative;
+0498    display: flex;
+0499    align-items: center;
+0500    justify-content: center;
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 11 页 / 共 60 页
+
+0501    gap: 12px;
+0502    margin-bottom: 10px;
+0503    padding: 10px 12px;
+0504    border: 3px solid #263143;
+0505    border-radius: 14px;
+0506    background: rgba(255, 253, 248, 0.88);
+0507    box-shadow: 5px 5px 0 rgba(38, 49, 67, 0.18);
+0508  }
+0509  
+0510  .brand {
+0511    display: flex;
+0512    align-items: center;
+0513    min-width: 0;
+0514    gap: 10px;
+0515  }
+0516  
+0517  .logo {
+0518    display: flex;
+0519    align-items: center;
+0520    justify-content: center;
+0521    width: 40px;
+0522    height: 40px;
+0523    flex-shrink: 0;
+0524    border-radius: 12px;
+0525    background: #263143;
+0526    color: #ffe45c;
+0527    font-size: 28px;
+0528    font-weight: 900;
+0529    line-height: 1;
+0530  }
+0531  
+0532  .title {
+0533    display: block;
+0534    font-size: 30px;
+0535    font-weight: 900;
+0536    line-height: 1.15;
+0537    color: #1d2433;
+0538  }
+0539  
+0540  .mode-badge {
+0541    position: absolute;
+0542    right: 32px;
+0543    flex-shrink: 0;
+0544    font-size: 20px;
+0545    line-height: 1.3;
+0546    padding: 7px 12px;
+0547    border: 2px solid #263143;
+0548    border-radius: 999px;
+0549    background: #ffe45c;
+0550    color: #263143;
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 12 页 / 共 60 页
+
+0551    font-weight: 900;
+0552  }
+0553  
+0554  .toolbar {
+0555    flex-shrink: 0;
+0556  }
+0557  
+0558  .play-area {
+0559    position: relative;
+0560    display: flex;
+0561    justify-content: center;
+0562    min-height: 0;
+0563    flex: 1;
+0564  }
+0565  
+0566  .start-panel {
+0567    position: absolute;
+0568    left: 50%;
+0569    top: 50%;
+0570    z-index: 12000;
+0571    display: flex;
+0572    flex-direction: column;
+0573    align-items: center;
+0574    width: min(520px, 84%);
+0575    padding: 18px 18px 20px;
+0576    border: 3px solid #263143;
+0577    border-radius: 16px;
+0578    background: linear-gradient(180deg, #fff8dd 0%, #ffe8a6 100%);
+0579    box-shadow: 7px 7px 0 rgba(38, 49, 67, 0.18);
+0580    transform: translate(-50%, -50%);
+0581    animation: panel-pop 0.24s cubic-bezier(0.18, 0.9, 0.28, 1.16);
+0582  }
+0583  
+0584  .start-title {
+0585    font-size: 28px;
+0586    font-weight: 900;
+0587    line-height: 1.2;
+0588    color: #263143;
+0589  }
+0590  
+0591  .start-copy {
+0592    margin-top: 6px;
+0593    font-size: 18px;
+0594    font-weight: 700;
+0595    line-height: 1.35;
+0596    color: #66572c;
+0597    text-align: center;
+0598  }
+0599  
+0600  .tips {
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 13 页 / 共 60 页
+
+0601    display: flex;
+0602    flex-direction: column;
+0603    gap: 8px;
+0604    width: 100%;
+0605    margin-top: 14px;
+0606  }
+0607  
+0608  .tip-row {
+0609    display: flex;
+0610    align-items: center;
+0611    gap: 10px;
+0612    min-height: 38px;
+0613    padding: 8px 12px;
+0614    border-radius: 14px;
+0615    background: rgba(255, 255, 255, 0.46);
+0616    color: #263143;
+0617    font-size: 19px;
+0618    font-weight: 800;
+0619    line-height: 1.25;
+0620  }
+0621  
+0622  .tip-icon {
+0623    display: flex;
+0624    align-items: center;
+0625    justify-content: center;
+0626    width: 30px;
+0627    height: 30px;
+0628    flex-shrink: 0;
+0629    border-radius: 50%;
+0630    background: #263143;
+0631    color: #ffe45c;
+0632    font-size: 24px;
+0633    font-weight: 500;
+0634    line-height: 1;
+0635  }
+0636  
+0637  .rotate-tip-icon {
+0638    font-size: 23px;
+0639    font-weight: 500;
+0640    transform: translateY(-0.5px);
+0641  }
+0642  
+0643  .start-button {
+0644    width: 100%;
+0645    height: 58px;
+0646    margin: 16px 0 0;
+0647    border: 0;
+0648    border-radius: 14px;
+0649    background: #1f6feb;
+0650    color: #fff;
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 14 页 / 共 60 页
+
+0651    font-size: 24px;
+0652    font-weight: 900;
+0653    line-height: 58px;
+0654  }
+0655  
+0656  .secondary-actions {
+0657    display: flex;
+0658    gap: 10px;
+0659    width: 100%;
+0660    margin-top: 10px;
+0661  }
+0662  
+0663  .secondary-button {
+0664    flex: 1;
+0665    height: 48px;
+0666    margin: 0;
+0667    border: 0;
+0668    border-radius: 14px;
+0669    background: rgba(38, 49, 67, 0.12);
+0670    color: #263143;
+0671    font-size: 21px;
+0672    font-weight: 900;
+0673    line-height: 48px;
+0674  }
+0675  
+0676  .start-button::after,
+0677  .secondary-button::after {
+0678    border: 0;
+0679  }
+0680  
+0681  .toast {
+0682    position: absolute;
+0683    left: 50%;
+0684    bottom: 28px;
+0685    z-index: 8000;
+0686    max-width: 82%;
+0687    padding: 14px 22px;
+0688    border-radius: 999px;
+0689    background: rgba(30, 38, 53, 0.9);
+0690    color: #fff;
+0691    font-size: 22px;
+0692    font-weight: 700;
+0693    line-height: 1.25;
+0694    transform: translateX(-50%);
+0695  }
+0696  
+0697  .debug-metrics {
+0698    position: absolute;
+0699    left: 16px;
+0700    bottom: 18px;
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 15 页 / 共 60 页
+
+0701    z-index: 8500;
+0702    display: flex;
+0703    flex-direction: column;
+0704    gap: 4px;
+0705    padding: 8px 10px;
+0706    border-radius: 10px;
+0707    background: rgba(29, 36, 51, 0.78);
+0708    color: #fff8dd;
+0709    font-size: 16px;
+0710    font-weight: 800;
+0711    line-height: 1.25;
+0712  }
+0713  
+0714  .operation-hint {
+0715    position: absolute;
+0716    left: 50%;
+0717    top: 50%;
+0718    z-index: 8000;
+0719    display: flex;
+0720    align-items: center;
+0721    gap: 10px;
+0722    max-width: 86%;
+0723    padding: 11px 16px 11px 12px;
+0724    border: 2px solid rgba(38, 49, 67, 0.9);
+0725    border-radius: 18px;
+0726    background: linear-gradient(135deg, rgba(38, 49, 67, 0.94), rgba(63, 75, 103, 0.94));
+0727    box-shadow: 5px 5px 0 rgba(255, 228, 92, 0.45);
+0728    color: #fff8dd;
+0729    font-size: 20px;
+0730    font-weight: 800;
+0731    line-height: 1.25;
+0732    text-align: center;
+0733    transform: translate(-50%, -50%);
+0734    animation: hint-pop 0.22s ease-out;
+0735  }
+0736  
+0737  .hint-icon {
+0738    display: flex;
+0739    align-items: center;
+0740    justify-content: center;
+0741    width: 34px;
+0742    height: 34px;
+0743    flex-shrink: 0;
+0744    border-radius: 50%;
+0745    background: #ffe45c;
+0746    color: #263143;
+0747    font-size: 24px;
+0748    font-weight: 500;
+0749    line-height: 1;
+0750  }
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 16 页 / 共 60 页
+
+0751  
+0752  .button-hover {
+0753    opacity: 0.94;
+0754    transform: scale(0.98);
+0755    animation: button-ripple 0.38s ease-out;
+0756  }
+0757  
+0758  @keyframes panel-pop {
+0759    0% {
+0760      opacity: 0;
+0761      transform: translate(-50%, -48%) scale(0.94);
+0762    }
+0763    100% {
+0764      opacity: 1;
+0765      transform: translate(-50%, -50%) scale(1);
+0766    }
+0767  }
+0768  
+0769  @keyframes hint-pop {
+0770    0% {
+0771      opacity: 0;
+0772      transform: translate(-50%, -46%) scale(0.92);
+0773    }
+0774    100% {
+0775      opacity: 1;
+0776      transform: translate(-50%, -50%) scale(1);
+0777    }
+0778  }
+0779  
+0780  @keyframes button-ripple {
+0781    0% {
+0782      box-shadow: inset 0 0 0 0 rgba(255, 255, 255, 0.38);
+0783    }
+0784    100% {
+0785      box-shadow: inset 0 0 0 999px rgba(255, 255, 255, 0);
+0786    }
+0787  }
+0788  
+0789  @media (max-width: 520px) {
+0790    .page {
+0791      padding-right: 12px;
+0792      padding-bottom: calc(10px + env(safe-area-inset-bottom));
+0793      padding-left: 12px;
+0794    }
+0795  
+0796    .header {
+0797      gap: 8px;
+0798      margin-bottom: 8px;
+0799      padding: 8px 10px;
+0800    }
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 17 页 / 共 60 页
+
+0801  
+0802    .logo {
+0803      width: 34px;
+0804      height: 34px;
+0805      border-radius: 10px;
+0806      font-size: 24px;
+0807    }
+0808  
+0809    .title {
+0810      font-size: 24px;
+0811    }
+0812  
+0813    .mode-badge {
+0814      right: 22px;
+0815      font-size: 17px;
+0816      padding: 5px 9px;
+0817    }
+0818  
+0819    .start-panel {
+0820      width: 88%;
+0821      padding: 14px;
+0822    }
+0823  
+0824    .start-title {
+0825      font-size: 21px;
+0826    }
+0827  
+0828    .start-copy {
+0829      font-size: 16px;
+0830    }
+0831  
+0832    .tip-row {
+0833      min-height: 34px;
+0834      font-size: 17px;
+0835    }
+0836  
+0837    .start-button {
+0838      height: 52px;
+0839      font-size: 22px;
+0840      line-height: 52px;
+0841    }
+0842  
+0843    .secondary-button {
+0844      height: 44px;
+0845      font-size: 19px;
+0846      line-height: 44px;
+0847    }
+0848  }
+0849  </style>
+0850  
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 18 页 / 共 60 页
+
+0851  // ===== src/components/GameToolbar.vue =====
+0852  <template>
+0853    <view class="toolbar">
+0854      <view class="time-pill" :class="{ urgent: remainingSeconds <= 20 && status === 'playing' }">
+0855        <text class="time-icon">⏱</text>
+0856        <text class="time-value">{{ countdownEnabled ? remainingSecondsText : '不限时' }}</text>
+0857      </view>
+0858    </view>
+0859  </template>
+0860  
+0861  <script setup lang="ts">
+0862  import { computed } from 'vue';
+0863  import type { GameStatus } from '@/game/types';
+0864  
+0865  const props = defineProps<{
+0866    remainingSeconds: number;
+0867    status: GameStatus;
+0868    countdownEnabled: boolean;
+0869  }>();
+0870  
+0871  const remainingSecondsText = computed(() => {
+0872    return String(props.remainingSeconds);
+0873  });
+0874  </script>
+0875  
+0876  <style scoped>
+0877  .toolbar {
+0878    display: flex;
+0879    align-items: center;
+0880    justify-content: center;
+0881    width: 100%;
+0882  }
+0883  
+0884  .time-pill {
+0885    display: flex;
+0886    align-items: center;
+0887    justify-content: center;
+0888    gap: 8px;
+0889    min-width: 112px;
+0890    height: 48px;
+0891    padding: 0 14px;
+0892    border: 2px solid #263143;
+0893    border-radius: 999px;
+0894    background: rgba(255, 253, 248, 0.92);
+0895    box-shadow: 4px 4px 0 rgba(38, 49, 67, 0.14);
+0896  }
+0897  
+0898  .time-pill.urgent {
+0899    border-color: rgba(203, 49, 60, 0.42);
+0900    background: #fff4f0;
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 19 页 / 共 60 页
+
+0901    color: #b52d35;
+0902  }
+0903  
+0904  .time-icon {
+0905    font-size: 22px;
+0906    line-height: 1;
+0907  }
+0908  
+0909  .time-value {
+0910    font-size: 28px;
+0911    font-weight: 800;
+0912    line-height: 1;
+0913    color: #1d2433;
+0914  }
+0915  </style>
+0916  
+0917  // ===== src/components/PuzzleBoard.vue =====
+0918  <template>
+0919    <view class="board-shell">
+0920      <view
+0921        ref="boardRef"
+0922        data-puzzle-board="true"
+0923        class="board"
+0924        :style="boardStyle"
+0925        @mousedown.stop="startBoardGesture"
+0926        @touchstart.stop="startBoardGesture"
+0927        @mousemove.stop="moveBoardGesture"
+0928        @touchmove.stop="moveBoardGesture"
+0929        @mouseup.stop="endBoardGesture"
+0930        @touchend.stop="endBoardGesture"
+0931        @touchcancel.stop="cancelBoardGesture"
+0932      >
+0933        <view class="grid" />
+0934        <template v-if="showTarget">
+0935          <view
+0936            v-for="target in targets"
+0937            :key="target.id"
+0938            class="target"
+0939            :style="targetStyle(target)"
+0940          />
+0941        </template>
+0942        <PuzzlePiece
+0943          v-for="piece in pieces"
+0944          :key="piece.id"
+0945          :piece="piece"
+0946          :scale="scale"
+0947          :active="piece.id === activePieceId"
+0948          :disabled="disabled"
+0949          :animate-layout="animateLayout"
+0950          :style="piece.id === guidePieceId && guideStep !== 'done' ? { zIndex: 10000 } : undefined"
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 20 页 / 共 60 页
+
+0951          :show-controls="showControls && piece.id === guidePieceId"
+0952          :guide-active="piece.id === guidePieceId && guideStep !== 'done'"
+0953          :guide-step="guideStep"
+0954          @activate="$emit('piece-activate', $event)"
+0955          @move="(id, dx, dy) => $emit('piece-move', id, dx, dy)"
+0956          @rotate="(id, deltaAngle) => $emit('piece-rotate', id, deltaAngle)"
+0957          @flip="$emit('piece-flip', $event)"
+0958        />
+0959        <view v-if="showDebugHitArea" class="debug-layer">
+0960          <view
+0961            v-for="debugPiece in debugPieces"
+0962            :key="debugPiece.id"
+0963            class="debug-piece"
+0964            :style="debugPiece.style"
+0965          />
+0966          <view
+0967            v-for="handle in debugHandles"
+0968            :key="handle.key"
+0969            class="debug-handle"
+0970            :style="handle.style"
+0971          />
+0972        </view>
+0973        <view v-if="disabled" class="board-lock" />
+0974        <button
+0975          class="board-music-button"
+0976          :class="{ playing: musicEnabled }"
+0977          hover-class="button-hover"
+0978          @tap.stop="$emit('toggle-music')"
+0979          @mousedown.stop
+0980          @touchstart.stop
+0981        >
+0982          <text class="music-note">🎵</text>
+0983        </button>
+0984      </view>
+0985    </view>
+0986  </template>
+0987  
+0988  <script setup lang="ts">
+0989  import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+0990  import PuzzlePiece from './PuzzlePiece.vue';
+0991  import { TAP_MAX_DISTANCE, TAP_MAX_DURATION_MS } from '@/composables/usePieceGesture';
+0992  import type { BoardSize, PieceState, Point, TargetPieceState } from '@/game/types';
+0993  
+0994  const props = defineProps<{
+0995    pieces: PieceState[];
+0996    targets: TargetPieceState[];
+0997    boardSize: BoardSize;
+0998    activePieceId: string;
+0999    disabled: boolean;
+1000    animateLayout: boolean;
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 21 页 / 共 60 页
+
+1001    musicEnabled: boolean;
+1002    showTarget: boolean;
+1003    showControls: boolean;
+1004    guidePieceId: string;
+1005    guideStep: 'drag' | 'flip' | 'rotate' | 'done';
+1006  }>();
+1007  
+1008  const emit = defineEmits<{
+1009    'piece-activate': [id: string];
+1010    'piece-move': [id: string, dx: number, dy: number];
+1011    'piece-rotate': [id: string, deltaAngle: number];
+1012    'piece-flip': [id: string, hingeX?: number];
+1013    'piece-gesture-end': [id?: string];
+1014    'toggle-music': [];
+1015  }>();
+1016  
+1017  type TouchLike = {
+1018    clientX?: number;
+1019    clientY?: number;
+1020    pageX?: number;
+1021    pageY?: number;
+1022  };
+1023  
+1024  type BoardEvent = MouseEvent | TouchEvent;
+1025  type GestureMode = 'drag' | 'rotate';
+1026  
+1027  type BoardGesture = {
+1028    id: string;
+1029    mode: GestureMode;
+1030    hingeX?: number;
+1031    startPoint: Point;
+1032    lastPoint: Point;
+1033    center: Point;
+1034    lastAngle: number;
+1035    startedAt: number;
+1036    moved: boolean;
+1037    receivedMove: boolean;
+1038  };
+1039  
+1040  type BoardRect = {
+1041    left: number;
+1042    top: number;
+1043  };
+1044  
+1045  const systemInfo = ref(uni.getSystemInfoSync());
+1046  const boardRef = ref<HTMLElement | { $el?: HTMLElement } | null>(null);
+1047  const gesture = ref<BoardGesture | null>(null);
+1048  const boardRect = ref<BoardRect>({ left: 0, top: 0 });
+1049  let documentListenersActive = false;
+1050  const instance = getCurrentInstance();
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 22 页 / 共 60 页
+
+1051  const showDebugHitArea = false;
+1052  
+1053  const scale = computed(() => {
+1054    const usableWidth = Math.max(320, systemInfo.value.windowWidth - 28);
+1055    const usableHeight = Math.max(520, systemInfo.value.windowHeight - 174);
+1056    const widthScale = usableWidth / props.boardSize.width;
+1057    const heightScale = usableHeight / props.boardSize.height;
+1058    return Math.min(widthScale, heightScale);
+1059  });
+1060  
+1061  const boardStyle = computed(() => ({
+1062    width: `${props.boardSize.width * scale.value}px`,
+1063    height: `${props.boardSize.height * scale.value}px`,
+1064  }));
+1065  
+1066  const debugPieces = computed(() =>
+1067    props.pieces.map((piece) => ({
+1068      id: piece.id,
+1069      style: {
+1070        clipPath: toScreenClipPath(getScreenPolygon(piece)),
+1071      },
+1072    })),
+1073  );
+1074  
+1075  const debugHandles = computed(() =>
+1076    props.pieces.flatMap((piece) =>
+1077      getDisplayVertices(piece).map((vertex, index) => {
+1078        const point = transformVertex(piece, vertex);
+1079        return {
+1080          key: `${piece.id}-${index}`,
+1081          style: {
+1082            left: `${point.x}px`,
+1083            top: `${point.y}px`,
+1084          },
+1085        };
+1086      }),
+1087    ),
+1088  );
+1089  
+1090  function targetStyle(target: TargetPieceState) {
+1091    const template = props.pieces.find((piece) => piece.id === target.id);
+1092    if (!template) {
+1093      return {};
+1094    }
+1095  
+1096    const width = template.width * scale.value;
+1097    const height = template.height * scale.value;
+1098    const x = target.x * scale.value;
+1099    const y = target.y * scale.value;
+1100  
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 23 页 / 共 60 页
+
+1101    return {
+1102      width: `${width}px`,
+1103      height: `${height}px`,
+1104      clipPath: `polygon(${template.polygon})`,
+1105      transform: `translate(${x - width / 2}px, ${y - height / 2}px) rotate(${target.rotation}deg)`,
+1106    };
+1107  }
+1108  
+1109  function getEventPoint(event: BoardEvent): Point {
+1110    const touchEvent = event as TouchEvent;
+1111    const mouseEvent = event as MouseEvent;
+1112    const touch = touchEvent.touches?.[0] ?? touchEvent.changedTouches?.[0];
+1113    return {
+1114      x: touch?.clientX ?? touch?.pageX ?? mouseEvent.clientX ?? mouseEvent.pageX ?? 0,
+1115      y: touch?.clientY ?? touch?.pageY ?? mouseEvent.clientY ?? mouseEvent.pageY ?? 0,
+1116    };
+1117  }
+1118  
+1119  function getBoardPoint(event: BoardEvent): Point {
+1120    const point = getEventPoint(event);
+1121    return {
+1122      x: point.x - boardRect.value.left,
+1123      y: point.y - boardRect.value.top,
+1124    };
+1125  }
+1126  
+1127  function getBoardElement(): HTMLElement | null {
+1128    const refValue = boardRef.value;
+1129    if (refValue && 'getBoundingClientRect' in refValue) {
+1130      return refValue;
+1131    }
+1132    if (refValue && '$el' in refValue && refValue.$el) {
+1133      return refValue.$el;
+1134    }
+1135    if (typeof document !== 'undefined') {
+1136      return document.querySelector('[data-puzzle-board="true"]');
+1137    }
+1138    return null;
+1139  }
+1140  
+1141  function syncBoardRectByDom(): boolean {
+1142    const element = getBoardElement();
+1143    const rect = element?.getBoundingClientRect?.();
+1144    if (!rect) {
+1145      return false;
+1146    }
+1147  
+1148    boardRect.value = {
+1149      left: rect.left,
+1150      top: rect.top,
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 24 页 / 共 60 页
+
+1151    };
+1152    return true;
+1153  }
+1154  
+1155  function syncBoardRectBySelector(): Promise<void> {
+1156    return new Promise((resolve) => {
+1157      const query = uni.createSelectorQuery().in(instance?.proxy);
+1158      query
+1159        .select('.board')
+1160        .boundingClientRect((rect) => {
+1161          if (!Array.isArray(rect) && rect) {
+1162            boardRect.value = {
+1163              left: rect.left ?? 0,
+1164              top: rect.top ?? 0,
+1165            };
+1166          }
+1167          resolve();
+1168        })
+1169        .exec();
+1170    });
+1171  }
+1172  
+1173  async function syncBoardRect() {
+1174    if (syncBoardRectByDom()) {
+1175      return;
+1176    }
+1177    await syncBoardRectBySelector();
+1178  }
+1179  
+1180  function getAngle(point: Point, center: Point): number {
+1181    return (Math.atan2(point.y - center.y, point.x - center.x) * 180) / Math.PI;
+1182  }
+1183  
+1184  function distance(a: Point, b: Point): number {
+1185    const dx = a.x - b.x;
+1186    const dy = a.y - b.y;
+1187    return Math.sqrt(dx * dx + dy * dy);
+1188  }
+1189  
+1190  function normalizeDeltaAngle(delta: number): number {
+1191    if (delta > 180) {
+1192      return delta - 360;
+1193    }
+1194    if (delta < -180) {
+1195      return delta + 360;
+1196    }
+1197    return delta;
+1198  }
+1199  
+1200  function getDisplayVertices(piece: PieceState): Point[] {
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 25 页 / 共 60 页
+
+1201    if (!piece.flipped) {
+1202      return piece.vertices;
+1203    }
+1204  
+1205    return piece.vertices.map((vertex) => ({
+1206      x: piece.width - vertex.x,
+1207      y: vertex.y,
+1208    }));
+1209  }
+1210  
+1211  function transformVertex(piece: PieceState, vertex: Point): Point {
+1212    const scaleValue = scale.value;
+1213    const center = {
+1214      x: piece.x * scaleValue,
+1215      y: piece.y * scaleValue,
+1216    };
+1217    const local = {
+1218      x: (vertex.x - piece.width / 2) * scaleValue,
+1219      y: (vertex.y - piece.height / 2) * scaleValue,
+1220    };
+1221    const angle = (piece.rotation * Math.PI) / 180;
+1222    return {
+1223      x: center.x + local.x * Math.cos(angle) - local.y * Math.sin(angle),
+1224      y: center.y + local.x * Math.sin(angle) + local.y * Math.cos(angle),
+1225    };
+1226  }
+1227  
+1228  function getScreenPolygon(piece: PieceState): Point[] {
+1229    return getDisplayVertices(piece).map((vertex) => transformVertex(piece, vertex));
+1230  }
+1231  
+1232  function toScreenClipPath(points: Point[]): string {
+1233    return `polygon(${points.map((point) => `${point.x}px ${point.y}px`).join(', ')})`;
+1234  }
+1235  
+1236  function pointInPolygon(point: Point, polygon: Point[]): boolean {
+1237    let inside = false;
+1238    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+1239      const a = polygon[i];
+1240      const b = polygon[j];
+1241      const intersects =
+1242        a.y > point.y !== b.y > point.y &&
+1243        point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x;
+1244      if (intersects) {
+1245        inside = !inside;
+1246      }
+1247    }
+1248    return inside;
+1249  }
+1250  
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 26 页 / 共 60 页
+
+1251  function sortedPieces() {
+1252    return [...props.pieces].sort((a, b) => {
+1253      const guideA = a.id === props.guidePieceId && props.guideStep !== 'done' ? 10000 : 0;
+1254      const guideB = b.id === props.guidePieceId && props.guideStep !== 'done' ? 10000 : 0;
+1255      return b.zIndex + guideB - (a.zIndex + guideA);
+1256    });
+1257  }
+1258  
+1259  function hitTest(point: Point): { piece: PieceState; mode: GestureMode } | null {
+1260    const rotateRadius = 18;
+1261  
+1262    for (const piece of sortedPieces()) {
+1263      const vertices = getDisplayVertices(piece).map((vertex) => transformVertex(piece, vertex));
+1264      if (vertices.some((vertex) => distance(point, vertex) <= rotateRadius)) {
+1265        return { piece, mode: 'rotate' };
+1266      }
+1267    }
+1268  
+1269    for (const piece of sortedPieces()) {
+1270      if (pointInPolygon(point, getScreenPolygon(piece))) {
+1271        return { piece, mode: 'drag' };
+1272      }
+1273    }
+1274  
+1275    return null;
+1276  }
+1277  
+1278  function getLocalHingeX(piece: PieceState, point: Point): number {
+1279    const scaleValue = scale.value;
+1280    const center = {
+1281      x: piece.x * scaleValue,
+1282      y: piece.y * scaleValue,
+1283    };
+1284    const dx = point.x - center.x;
+1285    const dy = point.y - center.y;
+1286    const angle = (-piece.rotation * Math.PI) / 180;
+1287    const localX = dx * Math.cos(angle) - dy * Math.sin(angle) + (piece.width * scaleValue) / 2;
+1288    const normalizedX = localX / scaleValue;
+1289    return Math.max(0, Math.min(piece.width, normalizedX));
+1290  }
+1291  
+1292  async function startBoardGesture(event: BoardEvent) {
+1293    if (props.disabled) {
+1294      return;
+1295    }
+1296  
+1297    event.preventDefault?.();
+1298    await syncBoardRect();
+1299    const point = getBoardPoint(event);
+1300    const hit = hitTest(point);
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 27 页 / 共 60 页
+
+1301    if (!hit) {
+1302      return;
+1303    }
+1304  
+1305    const center = {
+1306      x: hit.piece.x * scale.value,
+1307      y: hit.piece.y * scale.value,
+1308    };
+1309  
+1310    emit('piece-activate', hit.piece.id);
+1311    gesture.value = {
+1312      id: hit.piece.id,
+1313      mode: hit.mode,
+1314      hingeX: hit.mode === 'drag' ? getLocalHingeX(hit.piece, point) : undefined,
+1315      startPoint: point,
+1316      lastPoint: point,
+1317      center,
+1318      lastAngle: getAngle(point, center),
+1319      startedAt: Date.now(),
+1320      moved: false,
+1321      receivedMove: false,
+1322    };
+1323  
+1324    if (isMouseEvent(event)) {
+1325      bindDocumentMouseListeners();
+1326    }
+1327  }
+1328  
+1329  function moveBoardGesture(event: BoardEvent) {
+1330    if (!gesture.value) {
+1331      return;
+1332    }
+1333    event.preventDefault?.();
+1334    const point = getBoardPoint(event);
+1335    const activeGesture = gesture.value;
+1336    activeGesture.receivedMove = true;
+1337  
+1338    if (distance(point, activeGesture.startPoint) > 6) {
+1339      activeGesture.moved = true;
+1340    }
+1341  
+1342    if (activeGesture.mode === 'drag') {
+1343      emit(
+1344        'piece-move',
+1345        activeGesture.id,
+1346        (point.x - activeGesture.lastPoint.x) / scale.value,
+1347        (point.y - activeGesture.lastPoint.y) / scale.value,
+1348      );
+1349    } else {
+1350      const angle = getAngle(point, activeGesture.center);
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 28 页 / 共 60 页
+
+1351      emit('piece-rotate', activeGesture.id, normalizeDeltaAngle(angle - activeGesture.lastAngle));
+1352      activeGesture.lastAngle = angle;
+1353    }
+1354  
+1355    activeGesture.lastPoint = point;
+1356  }
+1357  
+1358  function endBoardGesture(event?: BoardEvent) {
+1359    const activeGesture = gesture.value;
+1360    if (!activeGesture) {
+1361      return;
+1362    }
+1363    if (event) {
+1364      event.preventDefault?.();
+1365    }
+1366    const endPoint = event ? getBoardPoint(event) : activeGesture.lastPoint;
+1367    const isTap =
+1368      !activeGesture.receivedMove &&
+1369      Date.now() - activeGesture.startedAt <= TAP_MAX_DURATION_MS &&
+1370      distance(endPoint, activeGesture.startPoint) <= TAP_MAX_DISTANCE;
+1371    if (activeGesture.mode === 'drag' && isTap) {
+1372      emit('piece-flip', activeGesture.id, activeGesture.hingeX);
+1373    }
+1374    gesture.value = null;
+1375    unbindDocumentMouseListeners();
+1376    emit('piece-gesture-end', activeGesture.id);
+1377  }
+1378  
+1379  function cancelBoardGesture() {
+1380    const activeGesture = gesture.value;
+1381    gesture.value = null;
+1382    unbindDocumentMouseListeners();
+1383    if (activeGesture) {
+1384      emit('piece-gesture-end', activeGesture.id);
+1385    }
+1386  }
+1387  
+1388  function isMouseEvent(event: BoardEvent): event is MouseEvent {
+1389    return 'button' in event;
+1390  }
+1391  
+1392  function bindDocumentMouseListeners() {
+1393    if (documentListenersActive || typeof document === 'undefined') {
+1394      return;
+1395    }
+1396    documentListenersActive = true;
+1397    document.addEventListener('mousemove', moveBoardGesture);
+1398    document.addEventListener('mouseup', endBoardGesture);
+1399  }
+1400  
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 29 页 / 共 60 页
+
+1401  function unbindDocumentMouseListeners() {
+1402    if (!documentListenersActive || typeof document === 'undefined') {
+1403      return;
+1404    }
+1405    documentListenersActive = false;
+1406    document.removeEventListener('mousemove', moveBoardGesture);
+1407    document.removeEventListener('mouseup', endBoardGesture);
+1408  }
+1409  
+1410  onBeforeUnmount(() => {
+1411    unbindDocumentMouseListeners();
+1412  });
+1413  
+1414  onMounted(async () => {
+1415    await nextTick();
+1416    await syncBoardRect();
+1417  });
+1418  </script>
+1419  
+1420  <style scoped>
+1421  .board-shell {
+1422    display: flex;
+1423    justify-content: center;
+1424    width: 100%;
+1425    min-height: 0;
+1426    padding: 12px 0 14px;
+1427  }
+1428  
+1429  .board {
+1430    position: relative;
+1431    overflow: hidden;
+1432    border: 1px solid rgba(70, 78, 94, 0.18);
+1433    border-radius: 10px;
+1434    background: #3f4648;
+1435    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 18px 32px rgba(55, 62, 78, 0.18);
+1436    touch-action: none;
+1437  }
+1438  
+1439  .grid {
+1440    position: absolute;
+1441    inset: 0;
+1442    opacity: 0.55;
+1443    background-image:
+1444      linear-gradient(rgba(255, 255, 255, 0.48) 1px, transparent 1px),
+1445      linear-gradient(90deg, rgba(255, 255, 255, 0.48) 1px, transparent 1px);
+1446    background-size: 42px 42px;
+1447  }
+1448  
+1449  .target {
+1450    position: absolute;
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 30 页 / 共 60 页
+
+1451    left: 0;
+1452    top: 0;
+1453    background: rgba(255, 255, 255, 0.16);
+1454    pointer-events: none;
+1455    transform-origin: center;
+1456  }
+1457  
+1458  .debug-layer {
+1459    position: absolute;
+1460    inset: 0;
+1461    z-index: 9000;
+1462    pointer-events: none;
+1463  }
+1464  
+1465  .debug-piece {
+1466    position: absolute;
+1467    inset: 0;
+1468    background: rgba(41, 151, 255, 0.2);
+1469    outline: 1px solid rgba(41, 151, 255, 0.95);
+1470  }
+1471  
+1472  .debug-handle {
+1473    position: absolute;
+1474    width: 36px;
+1475    height: 36px;
+1476    border: 2px solid rgba(50, 235, 132, 0.95);
+1477    border-radius: 50%;
+1478    background: rgba(50, 235, 132, 0.24);
+1479    transform: translate(-50%, -50%);
+1480  }
+1481  
+1482  .board-lock {
+1483    position: absolute;
+1484    inset: 0;
+1485    z-index: 9999;
+1486  }
+1487  
+1488  .board-music-button {
+1489    position: absolute;
+1490    top: 12px;
+1491    right: 12px;
+1492    z-index: 10020;
+1493    display: flex;
+1494    align-items: center;
+1495    justify-content: center;
+1496    width: 36px;
+1497    height: 36px;
+1498    margin: 0;
+1499    padding: 0;
+1500    border: 2px solid rgba(255, 255, 255, 0.86);
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 31 页 / 共 60 页
+
+1501    const { deltaAngle } = updateRotateGesture(gesture.value, event as UniTouchEventLike);
+1502    lastPointerMoved = true;
+1503    emit('rotate', props.piece.id, deltaAngle);
+1504  }
+1505  
+1506  function moveActiveGesture(event: MouseEvent | TouchEvent) {
+1507    if (!gesture.value) {
+1508      return;
+1509    }
+1510    if (gesture.value.mode === 'drag') {
+1511      moveDrag(event);
+1512    } else if (gesture.value.mode === 'rotate') {
+1513      moveRotate(event);
+1514    }
+1515  }
+1516  
+1517  function endActiveGesture(event: MouseEvent | TouchEvent) {
+1518    const shouldFlip =
+1519      gesture.value?.mode === 'drag' &&
+1520      isTapGesture(gesture.value, event as UniTouchEventLike);
+1521    endGesture();
+1522    if (shouldFlip) {
+1523      emit('activate', props.piece.id);
+1524      emit('flip', props.piece.id);
+1525      suppressTapUntil = Date.now() + 320;
+1526    }
+1527  }
+1528  
+1529  function endGesture() {
+1530    if (gesture.value?.moved) {
+1531      suppressTapUntil = Date.now() + 320;
+1532    }
+1533    gesture.value = null;
+1534    unbindDocumentMouseListeners();
+1535  }
+1536  
+1537  function isMouseEvent(event: MouseEvent | TouchEvent): event is MouseEvent {
+1538    return 'button' in event;
+1539  }
+1540  
+1541  function bindDocumentMouseListeners() {
+1542    if (documentListenersActive || typeof document === 'undefined') {
+1543      return;
+1544    }
+1545    documentListenersActive = true;
+1546    document.addEventListener('mousemove', handleDocumentMouseMove);
+1547    document.addEventListener('mouseup', handleDocumentMouseUp);
+1548  }
+1549  
+1550  function unbindDocumentMouseListeners() {
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 32 页 / 共 60 页
+
+1551    if (!documentListenersActive || typeof document === 'undefined') {
+1552      return;
+1553    }
+1554    documentListenersActive = false;
+1555    document.removeEventListener('mousemove', handleDocumentMouseMove);
+1556    document.removeEventListener('mouseup', handleDocumentMouseUp);
+1557  }
+1558  
+1559  function handleDocumentMouseMove(event: MouseEvent) {
+1560    moveActiveGesture(event);
+1561  }
+1562  
+1563  function handleDocumentMouseUp(event: MouseEvent) {
+1564    endActiveGesture(event);
+1565  }
+1566  
+1567  onBeforeUnmount(() => {
+1568    unbindDocumentMouseListeners();
+1569    if (flipTimer) {
+1570      clearTimeout(flipTimer);
+1571    }
+1572  });
+1573  
+1574  watch(
+1575    () => props.piece.flipped,
+1576    () => {
+1577      flipAnimating.value = true;
+1578      if (flipTimer) {
+1579        clearTimeout(flipTimer);
+1580      }
+1581      flipTimer = setTimeout(() => {
+1582        flipAnimating.value = false;
+1583      }, 280);
+1584    },
+1585  );
+1586  </script>
+1587  
+1588  <style scoped>
+1589  .piece {
+1590    position: absolute;
+1591    left: 0;
+1592    top: 0;
+1593    border-radius: 8px;
+1594    transform-origin: 50% 50%;
+1595    touch-action: none;
+1596    user-select: none;
+1597    pointer-events: none;
+1598  }
+1599  
+1600  .piece.position-animate {
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 33 页 / 共 60 页
+
+1601    transition: transform 0.28s ease-out;
+1602  }
+1603  
+1604  .piece.layout-animate {
+1605    transition: transform 0.62s cubic-bezier(0.18, 0.88, 0.28, 1.14);
+1606  }
+1607  
+1608  .guide-layer,
+1609  .flip-layer {
+1610    position: absolute;
+1611    inset: 0;
+1612  }
+1613  
+1614  .flip-layer {
+1615    transition:
+1616      transform 0.16s ease-out,
+1617      filter 0.16s ease-out;
+1618  }
+1619  
+1620  .piece-face {
+1621    position: absolute;
+1622    inset: 0;
+1623    overflow: hidden;
+1624  }
+1625  
+1626  .piece.active .piece-face {
+1627    filter: brightness(1.04);
+1628  }
+1629  
+1630  .piece.active .flip-layer {
+1631    transform: translateY(-4px);
+1632    filter: drop-shadow(0 10px 10px rgba(29, 36, 51, 0.2));
+1633  }
+1634  
+1635  .piece-outline {
+1636    position: absolute;
+1637    inset: 0;
+1638    background: rgba(255, 255, 255, 0.96);
+1639  }
+1640  
+1641  .shine {
+1642    position: absolute;
+1643    inset: 0;
+1644    background:
+1645      linear-gradient(120deg, rgba(255, 255, 255, 0.18), transparent 42%),
+1646      repeating-linear-gradient(45deg, rgba(255, 255, 255, calc(0.1 * var(--piece-texture))) 0 2px, transparent 2px 10px);
+1647  }
+1648  
+1649  .surface-handle {
+1650    position: absolute;
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 34 页 / 共 60 页
+
+1651    inset: 0;
+1652    background: transparent;
+1653  }
+1654  
+1655  .drag-handle {
+1656    position: absolute;
+1657    width: 44px;
+1658    height: 44px;
+1659    border-radius: 50%;
+1660    background: transparent;
+1661    transform: translate(-50%, -50%);
+1662  }
+1663  
+1664  .drag-handle.visible {
+1665    border: 3px solid rgba(255, 255, 255, 0.86);
+1666    background: rgba(20, 27, 41, 0.15);
+1667  }
+1668  
+1669  .rotate-handle {
+1670    position: absolute;
+1671    width: 34px;
+1672    height: 34px;
+1673    border: 0;
+1674    border-radius: 50%;
+1675    background: transparent;
+1676    background-clip: padding-box;
+1677    transform: translate(-50%, -50%);
+1678  }
+1679  
+1680  .rotate-handle.visible {
+1681    border: 3px solid rgba(255, 255, 255, 0.88);
+1682    background: rgba(29, 36, 51, 0.22);
+1683  }
+1684  
+1685  .guide-layer.guide-drag {
+1686    animation: guide-drag 1.8s ease-in-out infinite;
+1687  }
+1688  
+1689  .guide-layer.guide-flip .flip-layer {
+1690    animation: guide-flip 1.6s ease-in-out infinite;
+1691  }
+1692  
+1693  .guide-layer.flip-animate .flip-layer {
+1694    animation: flip-pop 0.28s ease-out;
+1695  }
+1696  
+1697  .guide-layer.guide-rotate {
+1698    animation: guide-rotate 1.8s ease-in-out infinite;
+1699  }
+1700  
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 35 页 / 共 60 页
+
+1701  @keyframes guide-drag {
+1702    0%,
+1703    100% {
+1704      transform: translate(0, 0);
+1705    }
+1706    45% {
+1707      transform: translate(54px, 26px);
+1708    }
+1709  }
+1710  
+1711  @keyframes guide-flip {
+1712    0%,
+1713    100% {
+1714      transform: scaleX(1);
+1715    }
+1716    50% {
+1717      transform: scaleX(-1);
+1718    }
+1719  }
+1720  
+1721  @keyframes flip-pop {
+1722    0% {
+1723      transform: rotateY(0deg) scale(1);
+1724      filter: brightness(1);
+1725    }
+1726    50% {
+1727      transform: rotateY(88deg) scale(0.98);
+1728      filter: brightness(1.18);
+1729    }
+1730    100% {
+1731      transform: rotateY(0deg) scale(1);
+1732      filter: brightness(1);
+1733    }
+1734  }
+1735  
+1736  @keyframes guide-rotate {
+1737    0%,
+1738    100% {
+1739      transform: rotate(0deg);
+1740    }
+1741    45% {
+1742      transform: rotate(26deg);
+1743    }
+1744  }
+1745  
+1746  </style>
+1747  
+1748  // ===== src/components/ResultModal.vue =====
+1749  <template>
+1750    <view v-if="visible" class="modal-mask">
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 36 页 / 共 60 页
+
+1751      <view class="modal">
+1752        <text class="title">{{ status === 'success' ? '拼对了' : '差一点' }}</text>
+1753        <text class="message">
+1754          {{ status === 'success' ? `用时 ${elapsedSeconds} 秒，挑战完成` : '时间用完了，换个节奏再试一次' }}
+1755        </text>
+1756        <view class="actions">
+1757          <button class="action primary" hover-class="button-hover" @tap="$emit('restart')">重来</button>
+1758          <button
+1759            v-if="status === 'success'"
+1760            class="action secondary"
+1761            hover-class="button-hover"
+1762            open-type="share"
+1763            @tap="$emit('share')"
+1764          >
+1765            分享给朋友试试
+1766          </button>
+1767          <button
+1768            v-else
+1769            class="action secondary"
+1770            hover-class="button-hover"
+1771            :disabled="!canLowerDifficulty"
+1772            @tap="$emit('lower-difficulty')"
+1773          >
+1774            降低难度
+1775          </button>
+1776        </view>
+1777      </view>
+1778    </view>
+1779  </template>
+1780  
+1781  <script setup lang="ts">
+1782  import type { GameStatus } from '@/game/types';
+1783  
+1784  defineProps<{
+1785    visible: boolean;
+1786    status: GameStatus;
+1787    elapsedSeconds: number;
+1788    canLowerDifficulty: boolean;
+1789  }>();
+1790  
+1791  defineEmits<{
+1792    restart: [];
+1793    share: [];
+1794    'lower-difficulty': [];
+1795  }>();
+1796  </script>
+1797  
+1798  <style scoped>
+1799  .modal-mask {
+1800    position: fixed;
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 37 页 / 共 60 页
+
+1801    inset: 0;
+1802    z-index: 10000;
+1803    display: flex;
+1804    align-items: center;
+1805    justify-content: center;
+1806    padding: 36px;
+1807    background: rgba(20, 25, 36, 0.56);
+1808    animation: mask-fade 0.18s ease-out;
+1809  }
+1810  
+1811  .modal {
+1812    width: min(560px, 100%);
+1813    padding: 38px 34px 32px;
+1814    border-radius: 10px;
+1815    background: #fffdf8;
+1816    box-shadow: 0 18px 44px rgba(12, 18, 30, 0.28);
+1817    text-align: center;
+1818    animation: modal-pop 0.24s cubic-bezier(0.18, 0.9, 0.28, 1.16);
+1819  }
+1820  
+1821  .title {
+1822    display: block;
+1823    font-size: 38px;
+1824    font-weight: 900;
+1825    line-height: 1.15;
+1826    color: #1d2433;
+1827  }
+1828  
+1829  .message {
+1830    display: block;
+1831    margin-top: 14px;
+1832    font-size: 24px;
+1833    line-height: 1.45;
+1834    color: #667085;
+1835  }
+1836  
+1837  .actions {
+1838    display: flex;
+1839    flex-direction: column;
+1840    gap: 14px;
+1841    margin-top: 28px;
+1842  }
+1843  
+1844  .action {
+1845    display: flex;
+1846    align-items: center;
+1847    justify-content: center;
+1848    width: 100%;
+1849    height: 60px;
+1850    margin: 0;
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 38 页 / 共 60 页
+
+1851    border: 0;
+1852    border-radius: 8px;
+1853    font-size: 24px;
+1854    font-weight: 800;
+1855    line-height: 60px;
+1856  }
+1857  
+1858  .action::after {
+1859    border: 0;
+1860  }
+1861  
+1862  .action.primary {
+1863    background: #1f6feb;
+1864    color: #fff;
+1865  }
+1866  
+1867  .action.secondary {
+1868    background: #ffe45c;
+1869    color: #263143;
+1870  }
+1871  
+1872  .action[disabled] {
+1873    opacity: 0.45;
+1874  }
+1875  
+1876  .button-hover {
+1877    opacity: 0.94;
+1878    transform: scale(0.98);
+1879    animation: button-ripple 0.38s ease-out;
+1880  }
+1881  
+1882  @keyframes mask-fade {
+1883    from {
+1884      opacity: 0;
+1885    }
+1886    to {
+1887      opacity: 1;
+1888    }
+1889  }
+1890  
+1891  @keyframes modal-pop {
+1892    0% {
+1893      opacity: 0;
+1894      transform: translateY(10px) scale(0.94);
+1895    }
+1896    100% {
+1897      opacity: 1;
+1898      transform: translateY(0) scale(1);
+1899    }
+1900  }
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 39 页 / 共 60 页
+
+1901  
+1902  @keyframes button-ripple {
+1903    0% {
+1904      box-shadow: inset 0 0 0 0 rgba(255, 255, 255, 0.38);
+1905    }
+1906    100% {
+1907      box-shadow: inset 0 0 0 999px rgba(255, 255, 255, 0);
+1908    }
+1909  }
+1910  </style>
+1911  
+1912  // ===== src/composables/usePieceGesture.ts =====
+1913  import type { Point } from '@/game/types';
+1914  
+1915  export type GestureMode = 'tap' | 'drag' | 'rotate';
+1916  export const TAP_MAX_DURATION_MS = 220;
+1917  export const TAP_MAX_DISTANCE = 4;
+1918  
+1919  export interface TouchLike {
+1920    clientX?: number;
+1921    clientY?: number;
+1922    pageX?: number;
+1923    pageY?: number;
+1924  }
+1925  
+1926  export interface UniTouchEventLike {
+1927    touches?: ArrayLike<TouchLike>;
+1928    changedTouches?: ArrayLike<TouchLike>;
+1929    clientX?: number;
+1930    clientY?: number;
+1931    pageX?: number;
+1932    pageY?: number;
+1933    stopPropagation?: () => void;
+1934    preventDefault?: () => void;
+1935  }
+1936  
+1937  export interface GestureStartOptions {
+1938    mode: GestureMode;
+1939    event: UniTouchEventLike;
+1940    center: Point;
+1941    scale: number;
+1942  }
+1943  
+1944  export interface GestureState {
+1945    mode: GestureMode;
+1946    startPoint: Point;
+1947    lastPoint: Point;
+1948    center: Point;
+1949    startAngle: number;
+1950    lastAngle: number;
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 40 页 / 共 60 页
+
+1951    startedAt: number;
+1952    moved: boolean;
+1953    receivedMove: boolean;
+1954    scale: number;
+1955  }
+1956  
+1957  function getTouchPoint(event: UniTouchEventLike): Point {
+1958    const touch = event.touches?.[0] ?? event.changedTouches?.[0];
+1959    return {
+1960      x: touch?.clientX ?? touch?.pageX ?? event.clientX ?? event.pageX ?? 0,
+1961      y: touch?.clientY ?? touch?.pageY ?? event.clientY ?? event.pageY ?? 0,
+1962    };
+1963  }
+1964  
+1965  function getAngle(point: Point, center: Point): number {
+1966    return (Math.atan2(point.y - center.y, point.x - center.x) * 180) / Math.PI;
+1967  }
+1968  
+1969  function distance(a: Point, b: Point): number {
+1970    const dx = a.x - b.x;
+1971    const dy = a.y - b.y;
+1972    return Math.sqrt(dx * dx + dy * dy);
+1973  }
+1974  
+1975  export function createGestureState(options: GestureStartOptions): GestureState {
+1976    options.event.stopPropagation?.();
+1977    options.event.preventDefault?.();
+1978  
+1979    const startPoint = getTouchPoint(options.event);
+1980    const startAngle = getAngle(startPoint, options.center);
+1981  
+1982    return {
+1983      mode: options.mode,
+1984      startPoint,
+1985      lastPoint: startPoint,
+1986      center: options.center,
+1987      startAngle,
+1988      lastAngle: startAngle,
+1989      startedAt: Date.now(),
+1990      moved: false,
+1991      receivedMove: false,
+1992      scale: options.scale || 1,
+1993    };
+1994  }
+1995  
+1996  export function updateDragGesture(state: GestureState, event: UniTouchEventLike) {
+1997    event.stopPropagation?.();
+1998    event.preventDefault?.();
+1999  
+2000    const nextPoint = getTouchPoint(event);
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 41 页 / 共 60 页
+
+2001    const dx = (nextPoint.x - state.lastPoint.x) / state.scale;
+2002    const dy = (nextPoint.y - state.lastPoint.y) / state.scale;
+2003    state.receivedMove = true;
+2004  
+2005    if (distance(nextPoint, state.startPoint) > 6) {
+2006      state.moved = true;
+2007    }
+2008  
+2009    state.lastPoint = nextPoint;
+2010    return { dx, dy };
+2011  }
+2012  
+2013  export function updateRotateGesture(state: GestureState, event: UniTouchEventLike) {
+2014    event.stopPropagation?.();
+2015    event.preventDefault?.();
+2016  
+2017    const nextPoint = getTouchPoint(event);
+2018    const nextAngle = getAngle(nextPoint, state.center);
+2019    let deltaAngle = nextAngle - state.lastAngle;
+2020    state.receivedMove = true;
+2021  
+2022    if (deltaAngle > 180) {
+2023      deltaAngle -= 360;
+2024    } else if (deltaAngle < -180) {
+2025      deltaAngle += 360;
+2026    }
+2027  
+2028    if (distance(nextPoint, state.startPoint) > 6) {
+2029      state.moved = true;
+2030    }
+2031  
+2032    state.lastPoint = nextPoint;
+2033    state.lastAngle = nextAngle;
+2034    return { deltaAngle };
+2035  }
+2036  
+2037  export function isTapGesture(state: GestureState, event: UniTouchEventLike): boolean {
+2038    const endPoint = getTouchPoint(event);
+2039    return (
+2040      !state.receivedMove &&
+2041      Date.now() - state.startedAt <= TAP_MAX_DURATION_MS &&
+2042      distance(endPoint, state.startPoint) <= TAP_MAX_DISTANCE
+2043    );
+2044  }
+2045  
+2046  // ===== src/composables/usePuzzleGame.ts =====
+2047  import { computed, onBeforeUnmount, ref, unref, type Ref } from 'vue';
+2048  import { createScatteredPieces } from '@/game/randomize';
+2049  import { getAreaSolveSummary, isSolved, normalizeAngle } from '@/game/rules';
+2050  import type { GameStatus, LevelConfig, PieceState } from '@/game/types';
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 42 页 / 共 60 页
+
+2051  
+2052  export function usePuzzleGame(levelInput: LevelConfig | Ref<LevelConfig>) {
+2053    const level = computed(() => unref(levelInput));
+2054    const pieces = ref<PieceState[]>([]);
+2055    const status = ref<GameStatus>('playing');
+2056    const remainingSeconds = ref(level.value.timeLimitSeconds);
+2057    const activePieceId = ref('');
+2058    const resultModalVisible = ref(false);
+2059    const toastMessage = ref('');
+2060    let timer: ReturnType<typeof setInterval> | undefined;
+2061    let toastTimer: ReturnType<typeof setTimeout> | undefined;
+2062    let zCounter = 10;
+2063  
+2064    const elapsedSeconds = computed(() => level.value.timeLimitSeconds - remainingSeconds.value);
+2065  
+2066    function stopTimer() {
+2067      if (timer) {
+2068        clearInterval(timer);
+2069        timer = undefined;
+2070      }
+2071    }
+2072  
+2073    function showToast(message: string) {
+2074      toastMessage.value = message;
+2075      if (toastTimer) {
+2076        clearTimeout(toastTimer);
+2077      }
+2078      toastTimer = setTimeout(() => {
+2079        toastMessage.value = '';
+2080      }, 1300);
+2081    }
+2082  
+2083    function failByTimeout() {
+2084      if (status.value !== 'playing') {
+2085        return;
+2086      }
+2087      if (isSolved(pieces.value, level.value.targets, level.value.tolerance)) {
+2088        stopTimer();
+2089        status.value = 'success';
+2090        resultModalVisible.value = true;
+2091        activePieceId.value = '';
+2092        return;
+2093      }
+2094      stopTimer();
+2095      status.value = 'failed';
+2096      resultModalVisible.value = true;
+2097      activePieceId.value = '';
+2098    }
+2099  
+2100    function startTimer() {
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 43 页 / 共 60 页
+
+2101      stopTimer();
+2102      if (!level.value.countdownEnabled) {
+2103        return;
+2104      }
+2105      timer = setInterval(() => {
+2106        if (remainingSeconds.value <= 1) {
+2107          remainingSeconds.value = 0;
+2108          failByTimeout();
+2109          return;
+2110        }
+2111        remainingSeconds.value -= 1;
+2112      }, 1000);
+2113    }
+2114  
+2115    function createSolvedPreviewPieces(): PieceState[] {
+2116      return level.value.targets.map((target, index) => {
+2117        const template = level.value.pieces.find((piece) => piece.id === target.id);
+2118        if (!template) {
+2119          return undefined;
+2120        }
+2121        return {
+2122          ...template,
+2123          x: target.x,
+2124          y: target.y,
+2125          rotation: target.rotation,
+2126          flipped: target.flipped,
+2127          zIndex: index + 1,
+2128        };
+2129      }).filter((piece): piece is PieceState => Boolean(piece));
+2130    }
+2131  
+2132    function resetRoundState(nextPieces: PieceState[]) {
+2133      stopTimer();
+2134      pieces.value = nextPieces;
+2135      status.value = 'playing';
+2136      remainingSeconds.value = level.value.timeLimitSeconds;
+2137      activePieceId.value = '';
+2138      resultModalVisible.value = false;
+2139      toastMessage.value = '';
+2140      zCounter = level.value.pieces.length + 10;
+2141    }
+2142  
+2143    function showSolvedPreview() {
+2144      resetRoundState(createSolvedPreviewPieces());
+2145    }
+2146  
+2147    function startGame(options: { startTimers?: boolean } = {}) {
+2148      resetRoundState(createScatteredPieces(level.value));
+2149      if (options.startTimers === false) {
+2150        return;
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 44 页 / 共 60 页
+
+2151      }
+2152      startTimer();
+2153    }
+2154  
+2155    function beginCountdown() {
+2156      if (status.value !== 'playing') {
+2157        return;
+2158      }
+2159      startTimer();
+2160    }
+2161  
+2162    function restart() {
+2163      startGame();
+2164    }
+2165  
+2166    function switchLevel(nextLevel: LevelConfig) {
+2167      if ('value' in Object(levelInput)) {
+2168        (levelInput as Ref<LevelConfig>).value = nextLevel;
+2169      }
+2170      showSolvedPreview();
+2171    }
+2172  
+2173    function activatePiece(id: string) {
+2174      if (status.value !== 'playing') {
+2175        return;
+2176      }
+2177      activePieceId.value = id;
+2178      pieces.value = pieces.value.map((piece) =>
+2179        piece.id === id ? { ...piece, zIndex: zCounter++ } : piece,
+2180      );
+2181    }
+2182  
+2183    function deactivatePiece() {
+2184      activePieceId.value = '';
+2185    }
+2186  
+2187    function updatePiece(id: string, updater: (piece: PieceState) => PieceState) {
+2188      if (status.value !== 'playing') {
+2189        return;
+2190      }
+2191      pieces.value = pieces.value.map((piece) => (piece.id === id ? updater(piece) : piece));
+2192    }
+2193  
+2194    function movePiece(id: string, dx: number, dy: number) {
+2195      updatePiece(id, (piece) => ({
+2196        ...piece,
+2197        x: Math.min(level.value.boardWidth, Math.max(0, piece.x + dx)),
+2198        y: Math.min(level.value.boardHeight, Math.max(0, piece.y + dy)),
+2199      }));
+2200    }
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 45 页 / 共 60 页
+
+2201  
+2202    function rotatePiece(id: string, deltaAngle: number) {
+2203      updatePiece(id, (piece) => ({
+2204        ...piece,
+2205        rotation: normalizeAngle(piece.rotation + deltaAngle),
+2206      }));
+2207    }
+2208  
+2209    function snapPieceRotation(id: string, threshold = 5) {
+2210      updatePiece(id, (piece) => {
+2211        const snappedRotation = snapAxisAngle(piece.rotation, threshold);
+2212        if (snappedRotation === piece.rotation) {
+2213          return piece;
+2214        }
+2215        return {
+2216          ...piece,
+2217          rotation: snappedRotation,
+2218        };
+2219      });
+2220    }
+2221  
+2222    function snapAxisAngle(rotation: number, threshold: number) {
+2223      const normalized = normalizeAngle(rotation);
+2224      const candidates = [0, 90, 180, 270, 360];
+2225      const closest = candidates.reduce((best, candidate) => {
+2226        const distance = Math.abs(normalized - candidate);
+2227        return distance < best.distance ? { angle: candidate, distance } : best;
+2228      }, { angle: normalized, distance: Number.POSITIVE_INFINITY });
+2229  
+2230      if (closest.distance > threshold) {
+2231        return normalized;
+2232      }
+2233  
+2234      return normalizeAngle(closest.angle);
+2235    }
+2236  
+2237    function flipPiece(id: string, hingeX?: number) {
+2238      updatePiece(id, (piece) => ({
+2239        ...piece,
+2240        flipped: !piece.flipped,
+2241        flipHingeX: hingeX,
+2242      }));
+2243    }
+2244  
+2245    function checkSolved(options: { silent?: boolean } = {}) {
+2246      if (status.value !== 'playing') {
+2247        return;
+2248      }
+2249      if (isSolved(pieces.value, level.value.targets, level.value.tolerance)) {
+2250        stopTimer();
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 46 页 / 共 60 页
+
+2251        status.value = 'success';
+2252        resultModalVisible.value = true;
+2253        activePieceId.value = '';
+2254        return;
+2255      }
+2256      if (options.silent) {
+2257        return;
+2258      }
+2259      const summary = getAreaSolveSummary(pieces.value, level.value.targets, level.value.tolerance);
+2260      if (summary.overlapAreaRatio > level.value.tolerance.overlapAreaRatio) {
+2261        showToast(`木块重叠 ${Math.round(summary.overlapAreaRatio * 100)}%`);
+2262        return;
+2263      }
+2264      if (summary.targetMismatchRatio > level.value.tolerance.targetMismatchRatio) {
+2265        showToast(`离 T 字还差 ${Math.round(summary.targetMismatchRatio * 100)}%`);
+2266        return;
+2267      }
+2268      showToast('还没对齐，再试试');
+2269    }
+2270  
+2271    onBeforeUnmount(() => {
+2272      stopTimer();
+2273      if (toastTimer) {
+2274        clearTimeout(toastTimer);
+2275      }
+2276    });
+2277  
+2278    showSolvedPreview();
+2279  
+2280    return {
+2281      pieces,
+2282      status,
+2283      remainingSeconds,
+2284      elapsedSeconds,
+2285      activePieceId,
+2286      resultModalVisible,
+2287      toastMessage,
+2288      showToast,
+2289      showSolvedPreview,
+2290      startGame,
+2291      beginCountdown,
+2292      restart,
+2293      switchLevel,
+2294      stopTimer,
+2295      checkSolved,
+2296      failByTimeout,
+2297      activatePiece,
+2298      deactivatePiece,
+2299      movePiece,
+2300      rotatePiece,
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 47 页 / 共 60 页
+
+2301      snapPieceRotation,
+2302      flipPiece,
+2303    };
+2304  }
+2305  
+2306  // ===== src/game/levels.ts =====
+2307  import type { LevelConfig, PieceTemplate, Point, TargetPieceState } from './types';
+2308  
+2309  const unitScale = 7;
+2310  const targetOrigin = {
+2311    x: 375 - (79.2 * unitScale) / 2,
+2312    y: 500 - (107.2 * unitScale) / 2,
+2313  };
+2314  
+2315  type ExactPieceSpec = {
+2316    id: string;
+2317    points: Point[];
+2318  };
+2319  
+2320  const exactPieceSpecs: ExactPieceSpec[] = [
+2321    {
+2322      id: 'piece-a',
+2323      points: [
+2324        { x: 0, y: 0 },
+2325        { x: 39.6, y: 0 },
+2326        { x: 11.6, y: 28 },
+2327        { x: 0, y: 28 },
+2328      ],
+2329    },
+2330    {
+2331      id: 'piece-b',
+2332      points: [
+2333        { x: 39.6, y: 0 },
+2334        { x: 79.2, y: 0 },
+2335        { x: 23.2, y: 56 },
+2336        { x: 23.2, y: 28 },
+2337        { x: 11.6, y: 28 },
+2338      ],
+2339    },
+2340    {
+2341      id: 'piece-c',
+2342      points: [
+2343        { x: 79.2, y: 0 },
+2344        { x: 79.2, y: 28 },
+2345        { x: 51.2, y: 28 },
+2346      ],
+2347    },
+2348    {
+2349      id: 'piece-d',
+2350      points: [
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 48 页 / 共 60 页
+
+2351        { x: 51.2, y: 28 },
+2352        { x: 51.2, y: 107.2 },
+2353        { x: 23.2, y: 107.2 },
+2354        { x: 23.2, y: 56 },
+2355      ],
+2356    },
+2357  ];
+2358  
+2359  function getBounds(points: Point[]) {
+2360    const xs = points.map((point) => point.x);
+2361    const ys = points.map((point) => point.y);
+2362    return {
+2363      minX: Math.min(...xs),
+2364      maxX: Math.max(...xs),
+2365      minY: Math.min(...ys),
+2366      maxY: Math.max(...ys),
+2367    };
+2368  }
+2369  
+2370  function formatPercent(value: number): string {
+2371    return `${Number(value.toFixed(4))}%`;
+2372  }
+2373  
+2374  function toPolygon(points: Point[]): string {
+2375    const bounds = getBounds(points);
+2376    const width = bounds.maxX - bounds.minX;
+2377    const height = bounds.maxY - bounds.minY;
+2378  
+2379    return points
+2380      .map((point) => {
+2381        const x = ((point.x - bounds.minX) / width) * 100;
+2382        const y = ((point.y - bounds.minY) / height) * 100;
+2383        return `${formatPercent(x)} ${formatPercent(y)}`;
+2384      })
+2385      .join(', ');
+2386  }
+2387  
+2388  function toLocalVertices(points: Point[]): Point[] {
+2389    const bounds = getBounds(points);
+2390    return points.map((point) => ({
+2391      x: (point.x - bounds.minX) * unitScale,
+2392      y: (point.y - bounds.minY) * unitScale,
+2393    }));
+2394  }
+2395  
+2396  function getPolygonCentroid(points: Point[]): Point {
+2397    let signedArea = 0;
+2398    let cx = 0;
+2399    let cy = 0;
+2400  
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 49 页 / 共 60 页
+
+2401    for (let index = 0; index < points.length; index += 1) {
+2402      const current = points[index];
+2403      const next = points[(index + 1) % points.length];
+2404      const cross = current.x * next.y - next.x * current.y;
+2405      signedArea += cross;
+2406      cx += (current.x + next.x) * cross;
+2407      cy += (current.y + next.y) * cross;
+2408    }
+2409  
+2410    signedArea *= 0.5;
+2411  
+2412    if (Math.abs(signedArea) < 0.0001) {
+2413      const sum = points.reduce(
+2414        (acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }),
+2415        { x: 0, y: 0 },
+2416      );
+2417      return {
+2418        x: sum.x / points.length,
+2419        y: sum.y / points.length,
+2420      };
+2421    }
+2422  
+2423    return {
+2424      x: cx / (6 * signedArea),
+2425      y: cy / (6 * signedArea),
+2426    };
+2427  }
+2428  
+2429  function toLocalActionCenter(points: Point[]): Point {
+2430    const bounds = getBounds(points);
+2431    const centroid = getPolygonCentroid(points);
+2432    return {
+2433      x: (centroid.x - bounds.minX) * unitScale,
+2434      y: (centroid.y - bounds.minY) * unitScale,
+2435    };
+2436  }
+2437  
+2438  const easyColors = ['#5f82f2', '#f0a23a', '#26b6a8', '#df5d77'];
+2439  const woodColor = '#d8a05a';
+2440  
+2441  function toPiece(spec: ExactPieceSpec, index: number, difficulty: LevelConfig['difficulty']): PieceTemplate {
+2442    const bounds = getBounds(spec.points);
+2443    return {
+2444      id: spec.id,
+2445      color: difficulty === 'easy' ? easyColors[index] : woodColor,
+2446      texture: difficulty === 'easy',
+2447      textureUrl: difficulty === 'normal' ? '/static/textures/wood-grain.png' : undefined,
+2448      width: (bounds.maxX - bounds.minX) * unitScale,
+2449      height: (bounds.maxY - bounds.minY) * unitScale,
+2450      polygon: toPolygon(spec.points),
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 50 页 / 共 60 页
+
+2451      vertices: toLocalVertices(spec.points),
+2452      actionCenter: toLocalActionCenter(spec.points),
+2453    };
+2454  }
+2455  
+2456  function toTarget(spec: ExactPieceSpec): TargetPieceState {
+2457    const bounds = getBounds(spec.points);
+2458    return {
+2459      id: spec.id,
+2460      x: targetOrigin.x + ((bounds.minX + bounds.maxX) / 2) * unitScale,
+2461      y: targetOrigin.y + ((bounds.minY + bounds.maxY) / 2) * unitScale,
+2462      rotation: 0,
+2463      flipped: false,
+2464    };
+2465  }
+2466  
+2467  function createLevel(difficulty: LevelConfig['difficulty']): LevelConfig {
+2468    return {
+2469      id: `t-four-pieces-${difficulty}`,
+2470      name: difficulty === 'easy' ? '简单版' : '默认挑战',
+2471      difficulty,
+2472      showTarget: difficulty === 'easy',
+2473      boardWidth: 750,
+2474      boardHeight: 1000,
+2475      timeLimitSeconds: 90,
+2476      countdownEnabled: true,
+2477      pieces: exactPieceSpecs.map((spec, index) => toPiece(spec, index, difficulty)),
+2478      targets: exactPieceSpecs.map(toTarget),
+2479      tolerance: {
+2480        position: 42,
+2481        angle: 14,
+2482        requireFlip: false,
+2483        allowAnyPieceOrder: false,
+2484        outsideAreaRatio: 0.08,
+2485        overlapAreaRatio: 0.018,
+2486        uncoveredAreaRatio: 0.08,
+2487        targetMismatchRatio: 0.08,
+2488        areaSampleStep: 5,
+2489        translationSearchRadius: 18,
+2490      },
+2491    };
+2492  }
+2493  
+2494  export const normalLevel = createLevel('normal');
+2495  export const easyLevel = createLevel('easy');
+2496  export const tLevel = normalLevel;
+2497  
+2498  export const levels = [normalLevel, easyLevel];
+2499  
+2500  // ===== src/game/randomize.ts =====
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 51 页 / 共 60 页
+
+2501  import type { LevelConfig, PieceState } from './types';
+2502  
+2503  function randomInRange(min: number, max: number): number {
+2504    return min + Math.random() * (max - min);
+2505  }
+2506  
+2507  export function createScatteredPieces(level: LevelConfig): PieceState[] {
+2508    return level.pieces.map((piece, index) => {
+2509      const margin = Math.max(piece.width, piece.height) / 2 + 20;
+2510  
+2511      return {
+2512        ...piece,
+2513        x: randomInRange(margin, level.boardWidth - margin),
+2514        y: randomInRange(margin + 120, level.boardHeight - margin),
+2515        rotation: randomInRange(0, 360),
+2516        flipped: Math.random() > 0.5,
+2517        zIndex: index + 1,
+2518      };
+2519    });
+2520  }
+2521  
+2522  // ===== src/game/rules.ts =====
+2523  import type {
+2524    AreaSolveSummary,
+2525    PieceSolveIssue,
+2526    PieceState,
+2527    Point,
+2528    SolveTolerance,
+2529    TargetPieceState,
+2530  } from './types';
+2531  
+2532  export function normalizeAngle(angle: number): number {
+2533    return ((angle % 360) + 360) % 360;
+2534  }
+2535  
+2536  export function angleDistance(a: number, b: number): number {
+2537    const diff = Math.abs(normalizeAngle(a) - normalizeAngle(b));
+2538    return Math.min(diff, 360 - diff);
+2539  }
+2540  
+2541  export function positionDistance(
+2542    a: Pick<PieceState, 'x' | 'y'>,
+2543    b: Pick<TargetPieceState, 'x' | 'y'>,
+2544  ): number {
+2545    const dx = a.x - b.x;
+2546    const dy = a.y - b.y;
+2547    return Math.sqrt(dx * dx + dy * dy);
+2548  }
+2549  
+2550  export function isSolved(
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 52 页 / 共 60 页
+
+2551    pieces: PieceState[],
+2552    targets: TargetPieceState[],
+2553    tolerance: SolveTolerance,
+2554  ): boolean {
+2555    return getAreaSolveSummary(pieces, targets, tolerance).solved;
+2556  }
+2557  
+2558  export function isPositionSolved(
+2559    pieces: PieceState[],
+2560    targets: TargetPieceState[],
+2561    tolerance: SolveTolerance,
+2562  ): boolean {
+2563    if (tolerance.allowAnyPieceOrder) {
+2564      return matchAnyPieceOrder(pieces, targets, tolerance).solved;
+2565    }
+2566  
+2567    return targets.every((target) => {
+2568      const piece = pieces.find((item) => item.id === target.id);
+2569      if (!piece) {
+2570        return false;
+2571      }
+2572  
+2573      const positionOk = positionDistance(piece, target) <= tolerance.position;
+2574      const angleOk = angleDistance(piece.rotation, target.rotation) <= tolerance.angle;
+2575      const flipOk = !tolerance.requireFlip || piece.flipped === target.flipped;
+2576  
+2577      return positionOk && angleOk && flipOk;
+2578    });
+2579  }
+2580  
+2581  export function getAreaSolveSummary(
+2582    pieces: PieceState[],
+2583    targets: TargetPieceState[],
+2584    tolerance: SolveTolerance,
+2585  ): AreaSolveSummary {
+2586    const piecePolygons = pieces.map((piece) => getPiecePolygon(piece));
+2587    const targetPolygons = targets
+2588      .map((target) => {
+2589        const template = pieces.find((piece) => piece.id === target.id);
+2590        return template ? getPiecePolygon({ ...template, ...target }) : [];
+2591      })
+2592      .filter((polygon) => polygon.length > 0);
+2593    const pieceBounds = getBounds(piecePolygons.flat());
+2594    const targetBounds = getBounds(targetPolygons.flat());
+2595    const bounds = getBounds([...piecePolygons.flat(), ...targetPolygons.flat()]);
+2596    const step = tolerance.areaSampleStep || 7;
+2597    let pieceArea = 0;
+2598    let targetArea = 0;
+2599    let overlapArea = 0;
+2600  
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 53 页 / 共 60 页
+
+2601    for (let y = bounds.minY; y <= bounds.maxY; y += step) {
+2602      for (let x = bounds.minX; x <= bounds.maxX; x += step) {
+2603        const point = { x: x + step / 2, y: y + step / 2 };
+2604        const pieceCoverCount = piecePolygons.reduce(
+2605          (count, polygon) => count + (pointInPolygon(point, polygon) ? 1 : 0),
+2606          0,
+2607        );
+2608        const inPiece = pieceCoverCount > 0;
+2609        const inTarget = targetPolygons.some((polygon) => pointInPolygon(point, polygon));
+2610  
+2611        if (inPiece) {
+2612          pieceArea += 1;
+2613        }
+2614        if (inTarget) {
+2615          targetArea += 1;
+2616        }
+2617        if (pieceCoverCount > 1) {
+2618          overlapArea += 1;
+2619        }
+2620      }
+2621    }
+2622  
+2623    const overlapAreaRatio = pieceArea > 0 ? overlapArea / pieceArea : 1;
+2624    const bestMatch = getBestTranslatedTargetMatch(
+2625      piecePolygons,
+2626      targetPolygons,
+2627      pieceBounds,
+2628      targetBounds,
+2629      step,
+2630      tolerance.translationSearchRadius || 0,
+2631    );
+2632  
+2633    return {
+2634      outsideAreaRatio: bestMatch.outsideAreaRatio,
+2635      overlapAreaRatio,
+2636      uncoveredAreaRatio: bestMatch.uncoveredAreaRatio,
+2637      targetMismatchRatio: bestMatch.targetMismatchRatio,
+2638      bestOffset: bestMatch.offset,
+2639      solved:
+2640        overlapAreaRatio <= tolerance.overlapAreaRatio &&
+2641        bestMatch.outsideAreaRatio <= tolerance.outsideAreaRatio &&
+2642        bestMatch.uncoveredAreaRatio <= tolerance.uncoveredAreaRatio &&
+2643        bestMatch.targetMismatchRatio <= tolerance.targetMismatchRatio,
+2644    };
+2645  }
+2646  
+2647  function getBestTranslatedTargetMatch(
+2648    piecePolygons: Point[][],
+2649    targetPolygons: Point[][],
+2650    pieceBounds: ReturnType<typeof getBounds>,
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 54 页 / 共 60 页
+
+2651    targetBounds: ReturnType<typeof getBounds>,
+2652    step: number,
+2653    radius: number,
+2654  ) {
+2655    const baseOffset = {
+2656      x: (targetBounds.minX + targetBounds.maxX - pieceBounds.minX - pieceBounds.maxX) / 2,
+2657      y: (targetBounds.minY + targetBounds.maxY - pieceBounds.minY - pieceBounds.maxY) / 2,
+2658    };
+2659    const offsets = radius > 0 ? [-radius, -radius / 2, 0, radius / 2, radius] : [0];
+2660    let best = {
+2661      outsideAreaRatio: 1,
+2662      uncoveredAreaRatio: 1,
+2663      targetMismatchRatio: 1,
+2664      offset: baseOffset,
+2665    };
+2666  
+2667    for (const dx of offsets) {
+2668      for (const dy of offsets) {
+2669        const candidate = measureTranslatedMatch(piecePolygons, targetPolygons, step, {
+2670          x: baseOffset.x + dx,
+2671          y: baseOffset.y + dy,
+2672        });
+2673        if (candidate.targetMismatchRatio < best.targetMismatchRatio) {
+2674          best = candidate;
+2675        }
+2676      }
+2677    }
+2678  
+2679    return best;
+2680  }
+2681  
+2682  function measureTranslatedMatch(
+2683    piecePolygons: Point[][],
+2684    targetPolygons: Point[][],
+2685    step: number,
+2686    offset: Point,
+2687  ) {
+2688    const shiftedPieces = piecePolygons.map((polygon) =>
+2689      polygon.map((point) => ({ x: point.x + offset.x, y: point.y + offset.y })),
+2690    );
+2691    const bounds = getBounds([...shiftedPieces.flat(), ...targetPolygons.flat()]);
+2692    let pieceArea = 0;
+2693    let targetArea = 0;
+2694    let overlapArea = 0;
+2695  
+2696    for (let y = bounds.minY; y <= bounds.maxY; y += step) {
+2697      for (let x = bounds.minX; x <= bounds.maxX; x += step) {
+2698        const point = { x: x + step / 2, y: y + step / 2 };
+2699        const inPiece = shiftedPieces.some((polygon) => pointInPolygon(point, polygon));
+2700        const inTarget = targetPolygons.some((polygon) => pointInPolygon(point, polygon));
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 55 页 / 共 60 页
+
+2701  
+2702        if (inPiece) {
+2703          pieceArea += 1;
+2704        }
+2705        if (inTarget) {
+2706          targetArea += 1;
+2707        }
+2708        if (inPiece && inTarget) {
+2709          overlapArea += 1;
+2710        }
+2711      }
+2712    }
+2713  
+2714    const outsideAreaRatio = pieceArea > 0 ? (pieceArea - overlapArea) / pieceArea : 1;
+2715    const uncoveredAreaRatio = targetArea > 0 ? (targetArea - overlapArea) / targetArea : 1;
+2716  
+2717    return {
+2718      outsideAreaRatio,
+2719      uncoveredAreaRatio,
+2720      targetMismatchRatio: Math.max(outsideAreaRatio, uncoveredAreaRatio),
+2721      offset,
+2722    };
+2723  }
+2724  
+2725  function getPiecePolygon(piece: PieceState): Point[] {
+2726    const vertices = piece.flipped
+2727      ? piece.vertices.map((vertex) => ({ x: piece.width - vertex.x, y: vertex.y }))
+2728      : piece.vertices;
+2729    const angle = (piece.rotation * Math.PI) / 180;
+2730  
+2731    return vertices.map((vertex) => {
+2732      const localX = vertex.x - piece.width / 2;
+2733      const localY = vertex.y - piece.height / 2;
+2734      return {
+2735        x: piece.x + localX * Math.cos(angle) - localY * Math.sin(angle),
+2736        y: piece.y + localX * Math.sin(angle) + localY * Math.cos(angle),
+2737      };
+2738    });
+2739  }
+2740  
+2741  function getBounds(points: Point[]) {
+2742    if (points.length === 0) {
+2743      return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+2744    }
+2745  
+2746    return {
+2747      minX: Math.min(...points.map((point) => point.x)),
+2748      maxX: Math.max(...points.map((point) => point.x)),
+2749      minY: Math.min(...points.map((point) => point.y)),
+2750      maxY: Math.max(...points.map((point) => point.y)),
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 56 页 / 共 60 页
+
+2751    };
+2752  }
+2753  
+2754  function pointInPolygon(point: Point, polygon: Point[]): boolean {
+2755    let inside = false;
+2756    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+2757      const a = polygon[i];
+2758      const b = polygon[j];
+2759      const intersects =
+2760        a.y > point.y !== b.y > point.y &&
+2761        point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x;
+2762      if (intersects) {
+2763        inside = !inside;
+2764      }
+2765    }
+2766    return inside;
+2767  }
+2768  
+2769  export function getSolveIssues(
+2770    pieces: PieceState[],
+2771    targets: TargetPieceState[],
+2772    tolerance: SolveTolerance,
+2773  ): PieceSolveIssue[] {
+2774    if (tolerance.allowAnyPieceOrder) {
+2775      return matchAnyPieceOrder(pieces, targets, tolerance).issues;
+2776    }
+2777  
+2778    return targets.map((target) => {
+2779      const piece = pieces.find((item) => item.id === target.id);
+2780      if (!piece) {
+2781        return {
+2782          pieceId: 'missing',
+2783          targetId: target.id,
+2784          positionDistance: Number.POSITIVE_INFINITY,
+2785          angleDistance: Number.POSITIVE_INFINITY,
+2786          flipOk: false,
+2787        };
+2788      }
+2789  
+2790      return createIssue(piece, target, tolerance);
+2791    });
+2792  }
+2793  
+2794  function createIssue(
+2795    piece: PieceState,
+2796    target: TargetPieceState,
+2797    tolerance: SolveTolerance,
+2798  ): PieceSolveIssue {
+2799    return {
+2800      pieceId: piece.id,
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 57 页 / 共 60 页
+
+2801      targetId: target.id,
+2802      positionDistance: positionDistance(piece, target),
+2803      angleDistance: angleDistance(piece.rotation, target.rotation),
+2804      flipOk: !tolerance.requireFlip || piece.flipped === target.flipped,
+2805    };
+2806  }
+2807  
+2808  function issuePasses(issue: PieceSolveIssue, tolerance: SolveTolerance): boolean {
+2809    return (
+2810      issue.positionDistance <= tolerance.position &&
+2811      issue.angleDistance <= tolerance.angle &&
+2812      issue.flipOk
+2813    );
+2814  }
+2815  
+2816  function matchAnyPieceOrder(
+2817    pieces: PieceState[],
+2818    targets: TargetPieceState[],
+2819    tolerance: SolveTolerance,
+2820  ): { solved: boolean; issues: PieceSolveIssue[] } {
+2821    const usedPieceIds = new Set<string>();
+2822    const issues: PieceSolveIssue[] = [];
+2823  
+2824    for (const target of targets) {
+2825      const candidates = pieces
+2826        .filter((piece) => !usedPieceIds.has(piece.id))
+2827        .map((piece) => createIssue(piece, target, tolerance))
+2828        .sort((a, b) => {
+2829          const scoreA = a.positionDistance + a.angleDistance * 2;
+2830          const scoreB = b.positionDistance + b.angleDistance * 2;
+2831          return scoreA - scoreB;
+2832        });
+2833  
+2834      const best = candidates[0];
+2835      if (!best) {
+2836        return { solved: false, issues };
+2837      }
+2838  
+2839      usedPieceIds.add(best.pieceId);
+2840      issues.push(best);
+2841    }
+2842  
+2843    return {
+2844      solved: issues.every((issue) => issuePasses(issue, tolerance)),
+2845      issues,
+2846    };
+2847  }
+2848  
+2849  // ===== src/game/types.ts =====
+2850  export type GameStatus = 'playing' | 'success' | 'failed';
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 58 页 / 共 60 页
+
+2851  
+2852  export interface Point {
+2853    x: number;
+2854    y: number;
+2855  }
+2856  
+2857  export interface BoardSize {
+2858    width: number;
+2859    height: number;
+2860  }
+2861  
+2862  export interface PieceTemplate {
+2863    id: string;
+2864    width: number;
+2865    height: number;
+2866    color: string;
+2867    texture: boolean;
+2868    textureUrl?: string;
+2869    polygon: string;
+2870    vertices: Point[];
+2871    actionCenter: Point;
+2872  }
+2873  
+2874  export interface PieceState extends PieceTemplate {
+2875    x: number;
+2876    y: number;
+2877    rotation: number;
+2878    flipped: boolean;
+2879    zIndex: number;
+2880    flipHingeX?: number;
+2881  }
+2882  
+2883  export interface TargetPieceState {
+2884    id: string;
+2885    x: number;
+2886    y: number;
+2887    rotation: number;
+2888    flipped: boolean;
+2889  }
+2890  
+2891  export interface SolveTolerance {
+2892    position: number;
+2893    angle: number;
+2894    requireFlip: boolean;
+2895    allowAnyPieceOrder: boolean;
+2896    outsideAreaRatio: number;
+2897    overlapAreaRatio: number;
+2898    uncoveredAreaRatio: number;
+2899    targetMismatchRatio: number;
+2900    areaSampleStep: number;
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 59 页 / 共 60 页
+
+2901    translationSearchRadius: number;
+2902  }
+2903  
+2904  export interface AreaSolveSummary {
+2905    solved: boolean;
+2906    outsideAreaRatio: number;
+2907    overlapAreaRatio: number;
+2908    uncoveredAreaRatio: number;
+2909    targetMismatchRatio: number;
+2910    bestOffset: Point;
+2911  }
+2912  
+2913  export interface PieceSolveIssue {
+2914    pieceId: string;
+2915    targetId: string;
+2916    positionDistance: number;
+2917    angleDistance: number;
+2918    flipOk: boolean;
+2919  }
+2920  
+2921  export interface LevelConfig {
+2922    id: string;
+2923    name: string;
+2924    difficulty: 'normal' | 'easy';
+2925    showTarget: boolean;
+2926    boardWidth: number;
+2927    boardHeight: number;
+2928    timeLimitSeconds: number;
+2929    countdownEnabled: boolean;
+2930    pieces: PieceTemplate[];
+2931    targets: TargetPieceState[];
+2932    tolerance: SolveTolerance;
+2933  }
+2934  
+2935  export interface MovePayload {
+2936    id: string;
+2937    dx: number;
+2938    dy: number;
+2939  }
+2940  
+2941  export interface RotatePayload {
+2942    id: string;
+2943    deltaAngle: number;
+2944  }
+2945  
+2946  // ===== tests/logic.test.ts =====
+2947  import { tLevel } from '../src/game/levels';
+2948  import { createScatteredPieces } from '../src/game/randomize';
+2949  import { angleDistance, isSolved, normalizeAngle } from '../src/game/rules';
+2950  import type { PieceState } from '../src/game/types';
+
+T字拼图小游戏软件 V1.0 源程序鉴别材料   第 60 页 / 共 60 页
+
+2951  
+2952  function assert(condition: boolean, message: string) {
+2953    if (!condition) {
+2954      throw new Error(message);
+2955    }
+2956  }
+2957  
+2958  assert(normalizeAngle(-1) === 359, 'normalizes negative angles');
+2959  assert(normalizeAngle(725) === 5, 'normalizes large angles');
+2960  assert(angleDistance(359, 1) === 2, 'measures shortest angle distance');
+2961  
+2962  const solvedPieces: PieceState[] = tLevel.targets.map((target, index) => ({
+2963    ...tLevel.pieces[index],
+2964    x: target.x,
+2965    y: target.y,
+2966    rotation: target.rotation,
+2967    flipped: target.flipped,
+2968    zIndex: index + 1,
+2969  }));
+2970  
+2971  assert(isSolved(solvedPieces, tLevel.targets, tLevel.tolerance), 'solved layout passes');
+2972  
+2973  const movedPieces = solvedPieces.map((piece) =>
+2974    piece.id === 'piece-a' ? { ...piece, x: piece.x + 80 } : piece,
+2975  );
+2976  assert(!isSolved(movedPieces, tLevel.targets, tLevel.tolerance), 'moved piece fails');
+2977  
+2978  const rotatedPieces = solvedPieces.map((piece) =>
+2979    piece.id === 'piece-a' ? { ...piece, rotation: piece.rotation + 90 } : piece,
+2980  );
+2981  assert(!isSolved(rotatedPieces, tLevel.targets, tLevel.tolerance), 'rotated piece fails');
+2982  
+2983  const flippedPieces = solvedPieces.map((piece) =>
+2984    piece.id === 'piece-a' ? { ...piece, flipped: !piece.flipped } : piece,
+2985  );
+2986  assert(!isSolved(flippedPieces, tLevel.targets, tLevel.tolerance), 'bad coverage fails');
+2987  
+2988  for (let run = 0; run < 20; run += 1) {
+2989    const scattered = createScatteredPieces(tLevel);
+2990    for (const piece of scattered) {
+2991      const margin = Math.max(piece.width, piece.height) / 2 + 20;
+2992      assert(piece.x >= margin, 'random x is inside left bound');
+2993      assert(piece.x <= tLevel.boardWidth - margin, 'random x is inside right bound');
+2994      assert(piece.y >= margin, 'random y is inside top bound');
+2995      assert(piece.y <= tLevel.boardHeight - margin, 'random y is inside bottom bound');
+2996    }
+2997  }
+2998  
+2999  console.log('logic tests passed');
+3000  

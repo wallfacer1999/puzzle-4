@@ -1,6 +1,8 @@
 import type { Point } from '@/game/types';
 
 export type GestureMode = 'tap' | 'drag' | 'rotate';
+export const TAP_MAX_DURATION_MS = 220;
+export const TAP_MAX_DISTANCE = 4;
 
 export interface TouchLike {
   clientX?: number;
@@ -36,6 +38,7 @@ export interface GestureState {
   lastAngle: number;
   startedAt: number;
   moved: boolean;
+  receivedMove: boolean;
   scale: number;
 }
 
@@ -73,6 +76,7 @@ export function createGestureState(options: GestureStartOptions): GestureState {
     lastAngle: startAngle,
     startedAt: Date.now(),
     moved: false,
+    receivedMove: false,
     scale: options.scale || 1,
   };
 }
@@ -84,6 +88,7 @@ export function updateDragGesture(state: GestureState, event: UniTouchEventLike)
   const nextPoint = getTouchPoint(event);
   const dx = (nextPoint.x - state.lastPoint.x) / state.scale;
   const dy = (nextPoint.y - state.lastPoint.y) / state.scale;
+  state.receivedMove = true;
 
   if (distance(nextPoint, state.startPoint) > 6) {
     state.moved = true;
@@ -100,6 +105,7 @@ export function updateRotateGesture(state: GestureState, event: UniTouchEventLik
   const nextPoint = getTouchPoint(event);
   const nextAngle = getAngle(nextPoint, state.center);
   let deltaAngle = nextAngle - state.lastAngle;
+  state.receivedMove = true;
 
   if (deltaAngle > 180) {
     deltaAngle -= 360;
@@ -118,5 +124,9 @@ export function updateRotateGesture(state: GestureState, event: UniTouchEventLik
 
 export function isTapGesture(state: GestureState, event: UniTouchEventLike): boolean {
   const endPoint = getTouchPoint(event);
-  return Date.now() - state.startedAt < 260 && distance(endPoint, state.startPoint) < 8;
+  return (
+    !state.receivedMove &&
+    Date.now() - state.startedAt <= TAP_MAX_DURATION_MS &&
+    distance(endPoint, state.startPoint) <= TAP_MAX_DISTANCE
+  );
 }

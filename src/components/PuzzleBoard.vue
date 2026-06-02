@@ -14,12 +14,14 @@
       @touchcancel.stop="cancelBoardGesture"
     >
       <view class="grid" />
-      <view
-        v-for="target in targets"
-        :key="target.id"
-        class="target"
-        :style="targetStyle(target)"
-      />
+      <template v-if="showTarget">
+        <view
+          v-for="target in targets"
+          :key="target.id"
+          class="target"
+          :style="targetStyle(target)"
+        />
+      </template>
       <PuzzlePiece
         v-for="piece in pieces"
         :key="piece.id"
@@ -27,6 +29,7 @@
         :scale="scale"
         :active="piece.id === activePieceId"
         :disabled="disabled"
+        :animate-layout="animateLayout"
         :style="piece.id === guidePieceId && guideStep !== 'done' ? { zIndex: 10000 } : undefined"
         :show-controls="showControls && piece.id === guidePieceId"
         :guide-active="piece.id === guidePieceId && guideStep !== 'done'"
@@ -36,7 +39,7 @@
         @rotate="(id, deltaAngle) => $emit('piece-rotate', id, deltaAngle)"
         @flip="$emit('piece-flip', $event)"
       />
-      <view class="debug-layer">
+      <view v-if="showDebugHitArea" class="debug-layer">
         <view
           v-for="debugPiece in debugPieces"
           :key="debugPiece.id"
@@ -51,13 +54,47 @@
         />
       </view>
       <view v-if="disabled" class="board-lock" />
+      <view
+        class="board-actions"
+        @mousedown.stop
+        @mousemove.stop
+        @mouseup.stop
+      >
+        <view
+          v-if="showSkipGuide"
+          class="board-skip-control"
+          hover-class="press-feedback"
+          hover-start-time="0"
+          hover-stay-time="120"
+          @click.stop="handleSkipGuide"
+          @mousedown.stop
+          @touchstart.stop
+          @touchend.stop="handleSkipGuide"
+        >
+          <text>跳过教程</text>
+        </view>
+        <view
+          class="board-music-control"
+          :class="{ playing: musicEnabled }"
+          hover-class="press-feedback"
+          hover-start-time="0"
+          hover-stay-time="120"
+          @click.stop="handleToggleMusic"
+          @mousedown.stop
+          @touchstart.stop
+          @touchend.stop="handleToggleMusic"
+        >
+          <text class="music-note">🎵</text>
+        </view>
+      </view>
     </view>
   </view>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue';
+import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import PuzzlePiece from './PuzzlePiece.vue';
+import { TAP_MAX_DISTANCE, TAP_MAX_DURATION_MS } from '@/composables/usePieceGesture';
 import type { BoardSize, PieceState, Point, TargetPieceState } from '@/game/types';
 
 const props = defineProps<{
@@ -66,7 +103,11 @@ const props = defineProps<{
   boardSize: BoardSize;
   activePieceId: string;
   disabled: boolean;
+  animateLayout: boolean;
+  musicEnabled: boolean;
+  showTarget: boolean;
   showControls: boolean;
+  showSkipGuide: boolean;
   guidePieceId: string;
   guideStep: 'drag' | 'flip' | 'rotate' | 'done';
 }>();
@@ -76,6 +117,9 @@ const emit = defineEmits<{
   'piece-move': [id: string, dx: number, dy: number];
   'piece-rotate': [id: string, deltaAngle: number];
   'piece-flip': [id: string, hingeX?: number];
+  'piece-gesture-end': [id?: string];
+  'toggle-music': [];
+  'skip-guide': [];
 }>();
 
 type TouchLike = {
@@ -96,7 +140,9 @@ type BoardGesture = {
   lastPoint: Point;
   center: Point;
   lastAngle: number;
+  startedAt: number;
   moved: boolean;
+  receivedMove: boolean;
 };
 
 type BoardRect = {
@@ -109,6 +155,9 @@ const boardRef = ref<HTMLElement | { $el?: HTMLElement } | null>(null);
 const gesture = ref<BoardGesture | null>(null);
 const boardRect = ref<BoardRect>({ left: 0, top: 0 });
 let documentListenersActive = false;
+const instance = getCurrentInstance();
+const showDebugHitArea = false;
+let lastControlActionAt = 0;
 
 const scale = computed(() => {
   const usableWidth = Math.max(320, systemInfo.value.windowWidth - 28);
@@ -178,7 +227,6 @@ function getEventPoint(event: BoardEvent): Point {
 
 function getBoardPoint(event: BoardEvent): Point {
   const point = getEventPoint(event);
-  syncBoardRect();
   return {
     x: point.x - boardRect.value.left,
     y: point.y - boardRect.value.top,
@@ -199,14 +247,43 @@ function getBoardElement(): HTMLElement | null {
   return null;
 }
 
-function syncBoardRect() {
+function syncBoardRectByDom(): boolean {
   const element = getBoardElement();
   const rect = element?.getBoundingClientRect?.();
+  if (!rect) {
+    return false;
+  }
 
   boardRect.value = {
-    left: rect?.left ?? 0,
-    top: rect?.top ?? 0,
+    left: rect.left,
+    top: rect.top,
   };
+  return true;
+}
+
+function syncBoardRectBySelector(): Promise<void> {
+  return new Promise((resolve) => {
+    const query = uni.createSelectorQuery().in(instance?.proxy);
+    query
+      .select('.board')
+      .boundingClientRect((rect) => {
+        if (!Array.isArray(rect) && rect) {
+          boardRect.value = {
+            left: rect.left ?? 0,
+            top: rect.top ?? 0,
+          };
+        }
+        resolve();
+      })
+      .exec();
+  });
+}
+
+async function syncBoardRect() {
+  if (syncBoardRectByDom()) {
+    return;
+  }
+  await syncBoardRectBySelector();
 }
 
 function getAngle(point: Point, center: Point): number {
@@ -289,7 +366,7 @@ function sortedPieces() {
 }
 
 function hitTest(point: Point): { piece: PieceState; mode: GestureMode } | null {
-  const rotateRadius = 18;
+  const rotateRadius = 24;
 
   for (const piece of sortedPieces()) {
     const vertices = getDisplayVertices(piece).map((vertex) => transformVertex(piece, vertex));
@@ -321,13 +398,13 @@ function getLocalHingeX(piece: PieceState, point: Point): number {
   return Math.max(0, Math.min(piece.width, normalizedX));
 }
 
-function startBoardGesture(event: BoardEvent) {
+async function startBoardGesture(event: BoardEvent) {
   if (props.disabled) {
     return;
   }
 
   event.preventDefault?.();
-  syncBoardRect();
+  await syncBoardRect();
   const point = getBoardPoint(event);
   const hit = hitTest(point);
   if (!hit) {
@@ -348,7 +425,9 @@ function startBoardGesture(event: BoardEvent) {
     lastPoint: point,
     center,
     lastAngle: getAngle(point, center),
+    startedAt: Date.now(),
     moved: false,
+    receivedMove: false,
   };
 
   if (isMouseEvent(event)) {
@@ -363,6 +442,7 @@ function moveBoardGesture(event: BoardEvent) {
   event.preventDefault?.();
   const point = getBoardPoint(event);
   const activeGesture = gesture.value;
+  activeGesture.receivedMove = true;
 
   if (distance(point, activeGesture.startPoint) > 6) {
     activeGesture.moved = true;
@@ -384,17 +464,34 @@ function moveBoardGesture(event: BoardEvent) {
   activeGesture.lastPoint = point;
 }
 
-function endBoardGesture() {
-  if (gesture.value?.mode === 'drag' && !gesture.value.moved) {
-    emit('piece-flip', gesture.value.id, gesture.value.hingeX);
+function endBoardGesture(event?: BoardEvent) {
+  const activeGesture = gesture.value;
+  if (!activeGesture) {
+    return;
+  }
+  if (event) {
+    event.preventDefault?.();
+  }
+  const endPoint = event ? getBoardPoint(event) : activeGesture.lastPoint;
+  const isTap =
+    !activeGesture.receivedMove &&
+    Date.now() - activeGesture.startedAt <= TAP_MAX_DURATION_MS &&
+    distance(endPoint, activeGesture.startPoint) <= TAP_MAX_DISTANCE;
+  if (activeGesture.mode === 'drag' && isTap) {
+    emit('piece-flip', activeGesture.id, activeGesture.hingeX);
   }
   gesture.value = null;
   unbindDocumentMouseListeners();
+  emit('piece-gesture-end', activeGesture.id);
 }
 
 function cancelBoardGesture() {
+  const activeGesture = gesture.value;
   gesture.value = null;
   unbindDocumentMouseListeners();
+  if (activeGesture) {
+    emit('piece-gesture-end', activeGesture.id);
+  }
 }
 
 function isMouseEvent(event: BoardEvent): event is MouseEvent {
@@ -419,8 +516,30 @@ function unbindDocumentMouseListeners() {
   document.removeEventListener('mouseup', endBoardGesture);
 }
 
+function runControlAction(action: () => void) {
+  const now = Date.now();
+  if (now - lastControlActionAt < 500) {
+    return;
+  }
+  lastControlActionAt = now;
+  action();
+}
+
+function handleSkipGuide() {
+  runControlAction(() => emit('skip-guide'));
+}
+
+function handleToggleMusic() {
+  runControlAction(() => emit('toggle-music'));
+}
+
 onBeforeUnmount(() => {
   unbindDocumentMouseListeners();
+});
+
+onMounted(async () => {
+  await nextTick();
+  await syncBoardRect();
 });
 </script>
 
@@ -491,4 +610,69 @@ onBeforeUnmount(() => {
   inset: 0;
   z-index: 9999;
 }
+
+.board-actions {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 10040;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.board-skip-control,
+.board-music-control {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  padding: 0;
+  border: 2px solid rgba(255, 255, 255, 0.86);
+  background: rgba(255, 253, 248, 0.88);
+  color: #7b8798;
+  line-height: 1;
+  box-sizing: border-box;
+  transform: translateZ(0);
+}
+
+.board-skip-control {
+  min-width: 94px;
+  padding: 0 12px;
+  border-radius: 999px;
+  color: #263143;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.board-music-control {
+  width: 36px;
+  border-radius: 50%;
+}
+
+.board-music-control.playing {
+  color: #263143;
+  background: #ffe45c;
+}
+
+.music-note {
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.board-music-control.playing .music-note {
+  animation: music-spin 8s linear infinite;
+}
+
+@keyframes music-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 </style>

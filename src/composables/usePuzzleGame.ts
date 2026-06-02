@@ -1,12 +1,13 @@
-import { computed, onBeforeUnmount, ref } from 'vue';
+import { computed, onBeforeUnmount, ref, unref, type Ref } from 'vue';
 import { createScatteredPieces } from '@/game/randomize';
 import { getAreaSolveSummary, isSolved, normalizeAngle } from '@/game/rules';
 import type { GameStatus, LevelConfig, PieceState } from '@/game/types';
 
-export function usePuzzleGame(level: LevelConfig) {
+export function usePuzzleGame(levelInput: LevelConfig | Ref<LevelConfig>) {
+  const level = computed(() => unref(levelInput));
   const pieces = ref<PieceState[]>([]);
   const status = ref<GameStatus>('playing');
-  const remainingSeconds = ref(level.timeLimitSeconds);
+  const remainingSeconds = ref(level.value.timeLimitSeconds);
   const activePieceId = ref('');
   const resultModalVisible = ref(false);
   const toastMessage = ref('');
@@ -14,7 +15,7 @@ export function usePuzzleGame(level: LevelConfig) {
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
   let zCounter = 10;
 
-  const elapsedSeconds = computed(() => level.timeLimitSeconds - remainingSeconds.value);
+  const elapsedSeconds = computed(() => level.value.timeLimitSeconds - remainingSeconds.value);
 
   function stopTimer() {
     if (timer) {
@@ -37,6 +38,13 @@ export function usePuzzleGame(level: LevelConfig) {
     if (status.value !== 'playing') {
       return;
     }
+    if (isSolved(pieces.value, level.value.targets, level.value.tolerance)) {
+      stopTimer();
+      status.value = 'success';
+      resultModalVisible.value = true;
+      activePieceId.value = '';
+      return;
+    }
     stopTimer();
     status.value = 'failed';
     resultModalVisible.value = true;
@@ -45,7 +53,7 @@ export function usePuzzleGame(level: LevelConfig) {
 
   function startTimer() {
     stopTimer();
-    if (!level.countdownEnabled) {
+    if (!level.value.countdownEnabled) {
       return;
     }
     timer = setInterval(() => {
@@ -58,20 +66,62 @@ export function usePuzzleGame(level: LevelConfig) {
     }, 1000);
   }
 
-  function startGame() {
-    pieces.value = createScatteredPieces(level);
+  function createSolvedPreviewPieces(): PieceState[] {
+    return level.value.targets.map((target, index) => {
+      const template = level.value.pieces.find((piece) => piece.id === target.id);
+      if (!template) {
+        return undefined;
+      }
+      return {
+        ...template,
+        x: target.x,
+        y: target.y,
+        rotation: target.rotation,
+        flipped: target.flipped,
+        zIndex: index + 1,
+      };
+    }).filter((piece): piece is PieceState => Boolean(piece));
+  }
+
+  function resetRoundState(nextPieces: PieceState[]) {
+    stopTimer();
+    pieces.value = nextPieces;
     status.value = 'playing';
-    remainingSeconds.value = level.timeLimitSeconds;
+    remainingSeconds.value = level.value.timeLimitSeconds;
     activePieceId.value = '';
     resultModalVisible.value = false;
     toastMessage.value = '';
-    zCounter = level.pieces.length + 10;
+    zCounter = level.value.pieces.length + 10;
+  }
+
+  function showSolvedPreview() {
+    resetRoundState(createSolvedPreviewPieces());
+  }
+
+  function startGame(options: { startTimers?: boolean } = {}) {
+    resetRoundState(createScatteredPieces(level.value));
+    if (options.startTimers === false) {
+      return;
+    }
+    startTimer();
+  }
+
+  function beginCountdown() {
+    if (status.value !== 'playing') {
+      return;
+    }
     startTimer();
   }
 
   function restart() {
-    stopTimer();
     startGame();
+  }
+
+  function switchLevel(nextLevel: LevelConfig) {
+    if ('value' in Object(levelInput)) {
+      (levelInput as Ref<LevelConfig>).value = nextLevel;
+    }
+    showSolvedPreview();
   }
 
   function activatePiece(id: string) {
@@ -84,6 +134,10 @@ export function usePuzzleGame(level: LevelConfig) {
     );
   }
 
+  function deactivatePiece() {
+    activePieceId.value = '';
+  }
+
   function updatePiece(id: string, updater: (piece: PieceState) => PieceState) {
     if (status.value !== 'playing') {
       return;
@@ -94,8 +148,8 @@ export function usePuzzleGame(level: LevelConfig) {
   function movePiece(id: string, dx: number, dy: number) {
     updatePiece(id, (piece) => ({
       ...piece,
-      x: Math.min(level.boardWidth, Math.max(0, piece.x + dx)),
-      y: Math.min(level.boardHeight, Math.max(0, piece.y + dy)),
+      x: Math.min(level.value.boardWidth, Math.max(0, piece.x + dx)),
+      y: Math.min(level.value.boardHeight, Math.max(0, piece.y + dy)),
     }));
   }
 
@@ -106,6 +160,34 @@ export function usePuzzleGame(level: LevelConfig) {
     }));
   }
 
+  function snapPieceRotation(id: string, threshold = 5) {
+    updatePiece(id, (piece) => {
+      const snappedRotation = snapAxisAngle(piece.rotation, threshold);
+      if (snappedRotation === piece.rotation) {
+        return piece;
+      }
+      return {
+        ...piece,
+        rotation: snappedRotation,
+      };
+    });
+  }
+
+  function snapAxisAngle(rotation: number, threshold: number) {
+    const normalized = normalizeAngle(rotation);
+    const candidates = [0, 90, 180, 270, 360];
+    const closest = candidates.reduce((best, candidate) => {
+      const distance = Math.abs(normalized - candidate);
+      return distance < best.distance ? { angle: candidate, distance } : best;
+    }, { angle: normalized, distance: Number.POSITIVE_INFINITY });
+
+    if (closest.distance > threshold) {
+      return normalized;
+    }
+
+    return normalizeAngle(closest.angle);
+  }
+
   function flipPiece(id: string, hingeX?: number) {
     updatePiece(id, (piece) => ({
       ...piece,
@@ -114,28 +196,27 @@ export function usePuzzleGame(level: LevelConfig) {
     }));
   }
 
-  function checkSolved() {
+  function checkSolved(options: { silent?: boolean } = {}) {
     if (status.value !== 'playing') {
       return;
     }
-    if (isSolved(pieces.value, level.targets, level.tolerance)) {
+    if (isSolved(pieces.value, level.value.targets, level.value.tolerance)) {
       stopTimer();
       status.value = 'success';
       resultModalVisible.value = true;
       activePieceId.value = '';
       return;
     }
-    const summary = getAreaSolveSummary(pieces.value, level.targets, level.tolerance);
-    if (summary.outsideAreaRatio > level.tolerance.outsideAreaRatio) {
-      showToast(`有木块超出 T 区域 ${Math.round(summary.outsideAreaRatio * 100)}%`);
+    if (options.silent) {
       return;
     }
-    if (summary.overlapAreaRatio > level.tolerance.overlapAreaRatio) {
+    const summary = getAreaSolveSummary(pieces.value, level.value.targets, level.value.tolerance);
+    if (summary.overlapAreaRatio > level.value.tolerance.overlapAreaRatio) {
       showToast(`木块重叠 ${Math.round(summary.overlapAreaRatio * 100)}%`);
       return;
     }
-    if (summary.uncoveredAreaRatio > level.tolerance.uncoveredAreaRatio) {
-      showToast(`T 区域还有空缺 ${Math.round(summary.uncoveredAreaRatio * 100)}%`);
+    if (summary.targetMismatchRatio > level.value.tolerance.targetMismatchRatio) {
+      showToast(`离 T 字还差 ${Math.round(summary.targetMismatchRatio * 100)}%`);
       return;
     }
     showToast('还没对齐，再试试');
@@ -148,7 +229,7 @@ export function usePuzzleGame(level: LevelConfig) {
     }
   });
 
-  startGame();
+  showSolvedPreview();
 
   return {
     pieces,
@@ -158,14 +239,20 @@ export function usePuzzleGame(level: LevelConfig) {
     activePieceId,
     resultModalVisible,
     toastMessage,
+    showToast,
+    showSolvedPreview,
     startGame,
+    beginCountdown,
     restart,
+    switchLevel,
     stopTimer,
     checkSolved,
     failByTimeout,
     activatePiece,
+    deactivatePiece,
     movePiece,
     rotatePiece,
+    snapPieceRotation,
     flipPiece,
   };
 }

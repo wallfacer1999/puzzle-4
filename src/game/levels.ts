@@ -8,14 +8,12 @@ const targetOrigin = {
 
 type ExactPieceSpec = {
   id: string;
-  color: string;
   points: Point[];
 };
 
 const exactPieceSpecs: ExactPieceSpec[] = [
   {
     id: 'piece-a',
-    color: '#5f82f2',
     points: [
       { x: 0, y: 0 },
       { x: 39.6, y: 0 },
@@ -25,7 +23,6 @@ const exactPieceSpecs: ExactPieceSpec[] = [
   },
   {
     id: 'piece-b',
-    color: '#f0a23a',
     points: [
       { x: 39.6, y: 0 },
       { x: 79.2, y: 0 },
@@ -36,7 +33,6 @@ const exactPieceSpecs: ExactPieceSpec[] = [
   },
   {
     id: 'piece-c',
-    color: '#26b6a8',
     points: [
       { x: 79.2, y: 0 },
       { x: 79.2, y: 28 },
@@ -45,7 +41,6 @@ const exactPieceSpecs: ExactPieceSpec[] = [
   },
   {
     id: 'piece-d',
-    color: '#df5d77',
     points: [
       { x: 51.2, y: 28 },
       { x: 51.2, y: 107.2 },
@@ -134,11 +129,16 @@ function toLocalActionCenter(points: Point[]): Point {
   };
 }
 
-function toPiece(spec: ExactPieceSpec): PieceTemplate {
+const easyColors = ['#5f82f2', '#f0a23a', '#26b6a8', '#df5d77'];
+const woodColor = '#d8a05a';
+
+function toPiece(spec: ExactPieceSpec, index: number, difficulty: LevelConfig['difficulty']): PieceTemplate {
   const bounds = getBounds(spec.points);
   return {
     id: spec.id,
-    color: spec.color,
+    color: difficulty === 'easy' ? easyColors[index] : woodColor,
+    texture: difficulty === 'easy',
+    textureUrl: difficulty === 'normal' ? '/static/textures/wood-grain.png' : undefined,
     width: (bounds.maxX - bounds.minX) * unitScale,
     height: (bounds.maxY - bounds.minY) * unitScale,
     polygon: toPolygon(spec.points),
@@ -158,27 +158,35 @@ function toTarget(spec: ExactPieceSpec): TargetPieceState {
   };
 }
 
-const pieces = exactPieceSpecs.map(toPiece);
+function createLevel(difficulty: LevelConfig['difficulty']): LevelConfig {
+  return {
+    id: `t-four-pieces-${difficulty}`,
+    name: difficulty === 'easy' ? '简单版' : '默认挑战',
+    difficulty,
+    showTarget: difficulty === 'easy',
+    boardWidth: 750,
+    boardHeight: 1000,
+    timeLimitSeconds: 99,
+    countdownEnabled: true,
+    pieces: exactPieceSpecs.map((spec, index) => toPiece(spec, index, difficulty)),
+    targets: exactPieceSpecs.map(toTarget),
+    tolerance: {
+      position: 42,
+      angle: 14,
+      requireFlip: false,
+      allowAnyPieceOrder: false,
+      outsideAreaRatio: 0.08,
+      overlapAreaRatio: 0.018,
+      uncoveredAreaRatio: 0.08,
+      targetMismatchRatio: 0.08,
+      areaSampleStep: 5,
+      translationSearchRadius: 18,
+    },
+  };
+}
 
-export const tLevel: LevelConfig = {
-  id: 't-four-pieces',
-  name: '四块拼 T',
-  boardWidth: 750,
-  boardHeight: 1000,
-  timeLimitSeconds: 60,
-  countdownEnabled: false,
-  pieces,
-  targets: exactPieceSpecs.map(toTarget),
-  tolerance: {
-    position: 42,
-    angle: 14,
-    requireFlip: false,
-    allowAnyPieceOrder: false,
-    outsideAreaRatio: 0.08,
-    overlapAreaRatio: 0.05,
-    uncoveredAreaRatio: 0.08,
-    areaSampleStep: 7,
-  },
-};
+export const normalLevel = createLevel('normal');
+export const easyLevel = createLevel('easy');
+export const tLevel = normalLevel;
 
-export const levels = [tLevel];
+export const levels = [normalLevel, easyLevel];

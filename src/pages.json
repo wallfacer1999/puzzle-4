@@ -8,6 +8,7 @@
       }
     }
   ],
+  "subPackages": [],
   "globalStyle": {
     "backgroundColor": "#f4f1ea",
     "navigationBarTextStyle": "black",

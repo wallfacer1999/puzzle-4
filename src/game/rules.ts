@@ -68,14 +68,13 @@ export function getAreaSolveSummary(
       return template ? getPiecePolygon({ ...template, ...target }) : [];
     })
     .filter((polygon) => polygon.length > 0);
-
+  const pieceBounds = getBounds(piecePolygons.flat());
+  const targetBounds = getBounds(targetPolygons.flat());
   const bounds = getBounds([...piecePolygons.flat(), ...targetPolygons.flat()]);
   const step = tolerance.areaSampleStep || 7;
   let pieceArea = 0;
   let targetArea = 0;
-  let outsideArea = 0;
   let overlapArea = 0;
-  let uncoveredArea = 0;
 
   for (let y = bounds.minY; y <= bounds.maxY; y += step) {
     for (let x = bounds.minX; x <= bounds.maxX; x += step) {
@@ -93,30 +92,111 @@ export function getAreaSolveSummary(
       if (inTarget) {
         targetArea += 1;
       }
-      if (inPiece && !inTarget) {
-        outsideArea += 1;
-      }
       if (pieceCoverCount > 1) {
         overlapArea += 1;
-      }
-      if (inTarget && !inPiece) {
-        uncoveredArea += 1;
       }
     }
   }
 
-  const outsideAreaRatio = pieceArea > 0 ? outsideArea / pieceArea : 1;
   const overlapAreaRatio = pieceArea > 0 ? overlapArea / pieceArea : 1;
-  const uncoveredAreaRatio = targetArea > 0 ? uncoveredArea / targetArea : 1;
+  const bestMatch = getBestTranslatedTargetMatch(
+    piecePolygons,
+    targetPolygons,
+    pieceBounds,
+    targetBounds,
+    step,
+    tolerance.translationSearchRadius || 0,
+  );
+
+  return {
+    outsideAreaRatio: bestMatch.outsideAreaRatio,
+    overlapAreaRatio,
+    uncoveredAreaRatio: bestMatch.uncoveredAreaRatio,
+    targetMismatchRatio: bestMatch.targetMismatchRatio,
+    bestOffset: bestMatch.offset,
+    solved:
+      overlapAreaRatio <= tolerance.overlapAreaRatio &&
+      bestMatch.outsideAreaRatio <= tolerance.outsideAreaRatio &&
+      bestMatch.uncoveredAreaRatio <= tolerance.uncoveredAreaRatio &&
+      bestMatch.targetMismatchRatio <= tolerance.targetMismatchRatio,
+  };
+}
+
+function getBestTranslatedTargetMatch(
+  piecePolygons: Point[][],
+  targetPolygons: Point[][],
+  pieceBounds: ReturnType<typeof getBounds>,
+  targetBounds: ReturnType<typeof getBounds>,
+  step: number,
+  radius: number,
+) {
+  const baseOffset = {
+    x: (targetBounds.minX + targetBounds.maxX - pieceBounds.minX - pieceBounds.maxX) / 2,
+    y: (targetBounds.minY + targetBounds.maxY - pieceBounds.minY - pieceBounds.maxY) / 2,
+  };
+  const offsets = radius > 0 ? [-radius, -radius / 2, 0, radius / 2, radius] : [0];
+  let best = {
+    outsideAreaRatio: 1,
+    uncoveredAreaRatio: 1,
+    targetMismatchRatio: 1,
+    offset: baseOffset,
+  };
+
+  for (const dx of offsets) {
+    for (const dy of offsets) {
+      const candidate = measureTranslatedMatch(piecePolygons, targetPolygons, step, {
+        x: baseOffset.x + dx,
+        y: baseOffset.y + dy,
+      });
+      if (candidate.targetMismatchRatio < best.targetMismatchRatio) {
+        best = candidate;
+      }
+    }
+  }
+
+  return best;
+}
+
+function measureTranslatedMatch(
+  piecePolygons: Point[][],
+  targetPolygons: Point[][],
+  step: number,
+  offset: Point,
+) {
+  const shiftedPieces = piecePolygons.map((polygon) =>
+    polygon.map((point) => ({ x: point.x + offset.x, y: point.y + offset.y })),
+  );
+  const bounds = getBounds([...shiftedPieces.flat(), ...targetPolygons.flat()]);
+  let pieceArea = 0;
+  let targetArea = 0;
+  let overlapArea = 0;
+
+  for (let y = bounds.minY; y <= bounds.maxY; y += step) {
+    for (let x = bounds.minX; x <= bounds.maxX; x += step) {
+      const point = { x: x + step / 2, y: y + step / 2 };
+      const inPiece = shiftedPieces.some((polygon) => pointInPolygon(point, polygon));
+      const inTarget = targetPolygons.some((polygon) => pointInPolygon(point, polygon));
+
+      if (inPiece) {
+        pieceArea += 1;
+      }
+      if (inTarget) {
+        targetArea += 1;
+      }
+      if (inPiece && inTarget) {
+        overlapArea += 1;
+      }
+    }
+  }
+
+  const outsideAreaRatio = pieceArea > 0 ? (pieceArea - overlapArea) / pieceArea : 1;
+  const uncoveredAreaRatio = targetArea > 0 ? (targetArea - overlapArea) / targetArea : 1;
 
   return {
     outsideAreaRatio,
-    overlapAreaRatio,
     uncoveredAreaRatio,
-    solved:
-      outsideAreaRatio <= tolerance.outsideAreaRatio &&
-      overlapAreaRatio <= tolerance.overlapAreaRatio &&
-      uncoveredAreaRatio <= tolerance.uncoveredAreaRatio,
+    targetMismatchRatio: Math.max(outsideAreaRatio, uncoveredAreaRatio),
+    offset,
   };
 }
 
