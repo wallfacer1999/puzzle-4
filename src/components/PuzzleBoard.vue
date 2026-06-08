@@ -13,7 +13,8 @@
       @touchend.stop="endBoardGesture"
       @touchcancel.stop="cancelBoardGesture"
     >
-      <view class="grid" />
+      <image class="board-texture" src="/static/textures/green-felt.jpg" mode="aspectFill" />
+      <view class="board-tint" />
       <template v-if="showTarget">
         <view
           v-for="target in targets"
@@ -30,6 +31,7 @@
         :active="piece.id === activePieceId"
         :disabled="disabled"
         :animate-layout="animateLayout"
+        :overlap-shadow="overlapShadowIds.has(piece.id)"
         :style="piece.id === guidePieceId && guideStep !== 'done' ? { zIndex: 10000 } : undefined"
         :show-controls="showControls && piece.id === guidePieceId"
         :guide-active="piece.id === guidePieceId && guideStep !== 'done'"
@@ -45,12 +47,19 @@
           :key="debugPiece.id"
           class="debug-piece"
           :style="debugPiece.style"
-        />
+        >
+          <view
+            v-for="handle in debugPiece.handles"
+            :key="handle.key"
+            class="debug-handle"
+            :style="handle.style"
+          />
+        </view>
         <view
-          v-for="handle in debugHandles"
-          :key="handle.key"
-          class="debug-handle"
-          :style="handle.style"
+          v-for="marker in debugVertexMarkers"
+          :key="marker.key"
+          class="debug-vertex-marker"
+          :style="marker.style"
         />
       </view>
       <view v-if="disabled" class="board-lock" />
@@ -108,6 +117,7 @@ const props = defineProps<{
   showTarget: boolean;
   showControls: boolean;
   showSkipGuide: boolean;
+  guidePractice: boolean;
   guidePieceId: string;
   guideStep: 'drag' | 'flip' | 'rotate' | 'done';
 }>();
@@ -117,7 +127,7 @@ const emit = defineEmits<{
   'piece-move': [id: string, dx: number, dy: number];
   'piece-rotate': [id: string, deltaAngle: number];
   'piece-flip': [id: string, hingeX?: number];
-  'piece-gesture-end': [id?: string];
+  'piece-gesture-end': [id?: string, action?: GestureMode | 'flip', meaningful?: boolean];
   'toggle-music': [];
   'skip-guide': [];
 }>();
@@ -157,11 +167,13 @@ const boardRect = ref<BoardRect>({ left: 0, top: 0 });
 let documentListenersActive = false;
 const instance = getCurrentInstance();
 const showDebugHitArea = false;
+const rotateHitRadius = 36;
+const vertexMarkerRadius = 8;
 let lastControlActionAt = 0;
 
 const scale = computed(() => {
   const usableWidth = Math.max(320, systemInfo.value.windowWidth - 28);
-  const usableHeight = Math.max(520, systemInfo.value.windowHeight - 174);
+  const usableHeight = Math.max(620, systemInfo.value.windowHeight - 126);
   const widthScale = usableWidth / props.boardSize.width;
   const heightScale = usableHeight / props.boardSize.height;
   return Math.min(widthScale, heightScale);
@@ -173,15 +185,30 @@ const boardStyle = computed(() => ({
 }));
 
 const debugPieces = computed(() =>
-  props.pieces.map((piece) => ({
-    id: piece.id,
-    style: {
-      clipPath: toScreenClipPath(getScreenPolygon(piece)),
-    },
-  })),
+  props.pieces.map((piece) => {
+    const polygon = getScreenPolygon(piece);
+    return {
+      id: piece.id,
+      style: {
+        clipPath: toScreenClipPath(polygon),
+      },
+      handles: getDisplayVertices(piece).map((vertex, index) => {
+      const point = transformVertex(piece, vertex);
+      return {
+        key: `${piece.id}-${index}`,
+        style: {
+          left: `${point.x}px`,
+          top: `${point.y}px`,
+          width: `${rotateHitRadius * 2}px`,
+          height: `${rotateHitRadius * 2}px`,
+        },
+      };
+      }),
+    };
+  }),
 );
 
-const debugHandles = computed(() =>
+const debugVertexMarkers = computed(() =>
   props.pieces.flatMap((piece) =>
     getDisplayVertices(piece).map((vertex, index) => {
       const point = transformVertex(piece, vertex);
@@ -190,11 +217,37 @@ const debugHandles = computed(() =>
         style: {
           left: `${point.x}px`,
           top: `${point.y}px`,
+          width: `${vertexMarkerRadius * 2}px`,
+          height: `${vertexMarkerRadius * 2}px`,
         },
       };
     }),
   ),
 );
+
+const overlapShadowIds = computed(() => {
+  const ids = new Set<string>();
+  const pieces = sortedPieces();
+  const polygons = new Map(pieces.map((piece) => [piece.id, getScreenPolygon(piece)]));
+
+  for (let index = 0; index < pieces.length; index += 1) {
+    const topPiece = pieces[index];
+    const topPolygon = polygons.get(topPiece.id);
+    if (!topPolygon) {
+      continue;
+    }
+    for (let otherIndex = index + 1; otherIndex < pieces.length; otherIndex += 1) {
+      const lowerPiece = pieces[otherIndex];
+      const lowerPolygon = polygons.get(lowerPiece.id);
+      if (lowerPolygon && polygonsOverlap(topPolygon, lowerPolygon)) {
+        ids.add(topPiece.id);
+        break;
+      }
+    }
+  }
+
+  return ids;
+});
 
 function targetStyle(target: TargetPieceState) {
   const template = props.pieces.find((piece) => piece.id === target.id);
@@ -357,6 +410,55 @@ function pointInPolygon(point: Point, polygon: Point[]): boolean {
   return inside;
 }
 
+function getPolygonBounds(polygon: Point[]) {
+  return {
+    minX: Math.min(...polygon.map((point) => point.x)),
+    maxX: Math.max(...polygon.map((point) => point.x)),
+    minY: Math.min(...polygon.map((point) => point.y)),
+    maxY: Math.max(...polygon.map((point) => point.y)),
+  };
+}
+
+function boundsOverlap(a: ReturnType<typeof getPolygonBounds>, b: ReturnType<typeof getPolygonBounds>) {
+  return a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY;
+}
+
+function cross(a: Point, b: Point, c: Point) {
+  return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+}
+
+function segmentsIntersect(a: Point, b: Point, c: Point, d: Point) {
+  const abC = cross(a, b, c);
+  const abD = cross(a, b, d);
+  const cdA = cross(c, d, a);
+  const cdB = cross(c, d, b);
+  return abC * abD < 0 && cdA * cdB < 0;
+}
+
+function polygonsOverlap(a: Point[], b: Point[]) {
+  if (!boundsOverlap(getPolygonBounds(a), getPolygonBounds(b))) {
+    return false;
+  }
+
+  if (a.some((point) => pointInPolygon(point, b)) || b.some((point) => pointInPolygon(point, a))) {
+    return true;
+  }
+
+  for (let i = 0; i < a.length; i += 1) {
+    const a1 = a[i];
+    const a2 = a[(i + 1) % a.length];
+    for (let j = 0; j < b.length; j += 1) {
+      const b1 = b[j];
+      const b2 = b[(j + 1) % b.length];
+      if (segmentsIntersect(a1, a2, b1, b2)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 function sortedPieces() {
   return [...props.pieces].sort((a, b) => {
     const guideA = a.id === props.guidePieceId && props.guideStep !== 'done' ? 10000 : 0;
@@ -365,18 +467,26 @@ function sortedPieces() {
   });
 }
 
-function hitTest(point: Point): { piece: PieceState; mode: GestureMode } | null {
-  const rotateRadius = 24;
+function hittablePieces() {
+  const pieces = sortedPieces();
+  if (!props.guidePractice) {
+    return pieces;
+  }
+  return pieces.filter((piece) => piece.id === props.guidePieceId);
+}
 
-  for (const piece of sortedPieces()) {
+function hitTest(point: Point): { piece: PieceState; mode: GestureMode } | null {
+  for (const piece of hittablePieces()) {
+    const polygon = getScreenPolygon(piece);
+    const inPiece = pointInPolygon(point, polygon);
     const vertices = getDisplayVertices(piece).map((vertex) => transformVertex(piece, vertex));
-    if (vertices.some((vertex) => distance(point, vertex) <= rotateRadius)) {
+    const inSmallRotateHandle = vertices.some((vertex) => distance(point, vertex) <= vertexMarkerRadius);
+    const inLargeRotateHandle = inPiece && vertices.some((vertex) => distance(point, vertex) <= rotateHitRadius);
+
+    if (inSmallRotateHandle || inLargeRotateHandle) {
       return { piece, mode: 'rotate' };
     }
-  }
-
-  for (const piece of sortedPieces()) {
-    if (pointInPolygon(point, getScreenPolygon(piece))) {
+    if (inPiece) {
       return { piece, mode: 'drag' };
     }
   }
@@ -404,7 +514,10 @@ async function startBoardGesture(event: BoardEvent) {
   }
 
   event.preventDefault?.();
-  await syncBoardRect();
+  const hasDomRect = syncBoardRectByDom();
+  if (!hasDomRect && boardRect.value.left === 0 && boardRect.value.top === 0) {
+    await syncBoardRectBySelector();
+  }
   const point = getBoardPoint(event);
   const hit = hitTest(point);
   if (!hit) {
@@ -482,7 +595,7 @@ function endBoardGesture(event?: BoardEvent) {
   }
   gesture.value = null;
   unbindDocumentMouseListeners();
-  emit('piece-gesture-end', activeGesture.id);
+  emit('piece-gesture-end', activeGesture.id, isTap ? 'flip' : activeGesture.mode, isTap || activeGesture.moved);
 }
 
 function cancelBoardGesture() {
@@ -490,7 +603,7 @@ function cancelBoardGesture() {
   gesture.value = null;
   unbindDocumentMouseListeners();
   if (activeGesture) {
-    emit('piece-gesture-end', activeGesture.id);
+    emit('piece-gesture-end', activeGesture.id, activeGesture.mode, activeGesture.moved);
   }
 }
 
@@ -549,27 +662,32 @@ onMounted(async () => {
   justify-content: center;
   width: 100%;
   min-height: 0;
-  padding: 12px 0 14px;
+  padding: 4px 0 6px;
 }
 
 .board {
   position: relative;
   overflow: hidden;
-  border: 1px solid rgba(70, 78, 94, 0.18);
-  border-radius: 10px;
-  background: #3f4648;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), 0 18px 32px rgba(55, 62, 78, 0.18);
+  border: 0;
+  border-radius: 8px;
+  background: #c9d9b1;
+  box-shadow:
+    inset 0 0 18px rgba(72, 86, 66, 0.22),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.24);
   touch-action: none;
 }
 
-.grid {
+.board-texture,
+.board-tint {
   position: absolute;
   inset: 0;
-  opacity: 0.55;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.48) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.48) 1px, transparent 1px);
-  background-size: 42px 42px;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.board-tint {
+  background: radial-gradient(circle at 48% 36%, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.03) 58%, rgba(55, 78, 50, 0.16) 100%);
 }
 
 .target {
@@ -591,17 +709,22 @@ onMounted(async () => {
 .debug-piece {
   position: absolute;
   inset: 0;
-  background: rgba(41, 151, 255, 0.2);
-  outline: 1px solid rgba(41, 151, 255, 0.95);
+  background: transparent;
 }
 
 .debug-handle {
   position: absolute;
-  width: 36px;
-  height: 36px;
-  border: 2px solid rgba(50, 235, 132, 0.95);
   border-radius: 50%;
-  background: rgba(50, 235, 132, 0.24);
+  background: rgba(71, 214, 255, 0.42);
+  box-shadow: inset 0 0 0 2px rgba(20, 126, 255, 0.92);
+  transform: translate(-50%, -50%);
+}
+
+.debug-vertex-marker {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 90, 92, 0.9);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
   transform: translate(-50%, -50%);
 }
 

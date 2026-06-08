@@ -1,7 +1,7 @@
 import { computed, onBeforeUnmount, ref, unref, type Ref } from 'vue';
 import { createScatteredPieces } from '@/game/randomize';
 import { getAreaSolveSummary, isSolved, normalizeAngle } from '@/game/rules';
-import type { GameStatus, LevelConfig, PieceState } from '@/game/types';
+import type { AreaSolveSummary, GameStatus, LevelConfig, PieceState } from '@/game/types';
 
 export function usePuzzleGame(levelInput: LevelConfig | Ref<LevelConfig>) {
   const level = computed(() => unref(levelInput));
@@ -129,9 +129,10 @@ export function usePuzzleGame(levelInput: LevelConfig | Ref<LevelConfig>) {
       return;
     }
     activePieceId.value = id;
-    pieces.value = pieces.value.map((piece) =>
-      piece.id === id ? { ...piece, zIndex: zCounter++ } : piece,
-    );
+    const piece = pieces.value.find((item) => item.id === id);
+    if (piece) {
+      piece.zIndex = zCounter++;
+    }
   }
 
   function deactivatePiece() {
@@ -142,7 +143,11 @@ export function usePuzzleGame(levelInput: LevelConfig | Ref<LevelConfig>) {
     if (status.value !== 'playing') {
       return;
     }
-    pieces.value = pieces.value.map((piece) => (piece.id === id ? updater(piece) : piece));
+    const piece = pieces.value.find((item) => item.id === id);
+    if (!piece) {
+      return;
+    }
+    Object.assign(piece, updater(piece));
   }
 
   function movePiece(id: string, dx: number, dy: number) {
@@ -196,11 +201,12 @@ export function usePuzzleGame(levelInput: LevelConfig | Ref<LevelConfig>) {
     }));
   }
 
-  function checkSolved(options: { silent?: boolean } = {}) {
+  function checkSolved(options: { silent?: boolean; summary?: AreaSolveSummary } = {}) {
     if (status.value !== 'playing') {
       return;
     }
-    if (isSolved(pieces.value, level.value.targets, level.value.tolerance)) {
+    const summary = options.summary ?? getAreaSolveSummary(pieces.value, level.value.targets, level.value.tolerance);
+    if (summary.solved) {
       stopTimer();
       status.value = 'success';
       resultModalVisible.value = true;
@@ -210,13 +216,12 @@ export function usePuzzleGame(levelInput: LevelConfig | Ref<LevelConfig>) {
     if (options.silent) {
       return;
     }
-    const summary = getAreaSolveSummary(pieces.value, level.value.targets, level.value.tolerance);
     if (summary.overlapAreaRatio > level.value.tolerance.overlapAreaRatio) {
       showToast(`木块重叠 ${Math.round(summary.overlapAreaRatio * 100)}%`);
       return;
     }
     if (summary.targetMismatchRatio > level.value.tolerance.targetMismatchRatio) {
-      showToast(`离 T 字还差 ${Math.round(summary.targetMismatchRatio * 100)}%`);
+      showToast(`离谜底还差 ${Math.round(summary.targetMismatchRatio * 100)}%`);
       return;
     }
     showToast('还没对齐，再试试');

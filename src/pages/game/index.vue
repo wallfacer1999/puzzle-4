@@ -3,7 +3,7 @@
     <view class="header" :style="headerStyle">
       <view class="brand">
         <text class="logo">T</text>
-        <text class="title">字拼图</text>
+        <text class="title">字之谜</text>
       </view>
       <text v-if="level.difficulty === 'easy'" class="mode-badge">简单版</text>
     </view>
@@ -22,11 +22,12 @@
         :show-target="level.showTarget"
         :board-size="{ width: level.boardWidth, height: level.boardHeight }"
         :active-piece-id="activePieceId"
-        :disabled="phase !== 'playing' || status !== 'playing' || resultModalVisible"
+        :disabled="!canOperateBoard || status !== 'playing' || resultModalVisible"
         :animate-layout="boardAnimating"
         :music-enabled="musicEnabled"
         :show-controls="phase === 'guide' && guideMode === 'demo' && guideStep !== 'done'"
         :show-skip-guide="phase === 'guide' && guideStep !== 'done'"
+        :guide-practice="phase === 'guide' && guideMode === 'practice'"
         :guide-piece-id="guidePieceId"
         :guide-step="guideStep"
         @piece-activate="activatePiece"
@@ -49,7 +50,7 @@
       </view>
       <view v-if="phase === 'preview'" class="start-panel">
         <text class="start-title">准备挑战</text>
-        <text class="start-copy">打散后开始计时，拼回刚才的 T 字</text>
+        <text class="start-copy">打散后开始计时，解开刚才的 T 字之谜</text>
         <view class="tips">
           <view class="tip-row">
             <image class="tip-icon-image" src="/static/icons/tutorial-move.png" mode="aspectFit" />
@@ -94,11 +95,16 @@
           </button>
         </view>
       </view>
-      <view v-if="phase === 'guide' && guideMode === 'hint' && guideStep !== 'done'" class="operation-hint">
+      <view
+        v-if="phase === 'guide' && guideMode === 'practice' && !guidePracticeCompleting && guideStep !== 'done'"
+        class="operation-hint"
+      >
         <image class="hint-icon-image" :src="guideIconSrc" mode="aspectFit" />
         <text>{{ guideText }}</text>
       </view>
     </view>
+
+    <view class="ad-reserved" />
 
     <ResultModal
       :visible="resultModalVisible"
@@ -124,10 +130,14 @@ import { getAreaSolveSummary } from '@/game/rules';
 
 const level = ref(normalLevel);
 const phase = ref<'preview' | 'guide' | 'scattering' | 'playing'>('guide');
-const guideStep = ref<'drag' | 'flip' | 'rotate' | 'done'>('drag');
-const guideMode = ref<'hint' | 'demo'>('hint');
+type GuideStep = 'drag' | 'rotate' | 'flip';
+type GuideAction = GuideStep;
+const guideStep = ref<GuideStep | 'done'>('drag');
+const guideMode = ref<'demo' | 'practice'>('demo');
+const guidePracticeCompleting = ref(false);
 const boardAnimating = ref(false);
 const musicEnabled = ref(false);
+const musicMutedByUser = ref(false);
 const debugMetrics = ref({
   overlap: '0.0',
   overlapLimit: '0.0',
@@ -148,11 +158,19 @@ const navTop = menuButton?.top ?? safeTop + 8;
 const navHeight = menuButton?.height ?? 40;
 let hintTimers: ReturnType<typeof setTimeout>[] = [];
 let boardAnimationTimer: ReturnType<typeof setTimeout> | undefined;
+let solveCheckTimer: ReturnType<typeof setTimeout> | undefined;
 let bgm: UniApp.InnerAudioContext | undefined;
 let successSound: UniApp.InnerAudioContext | undefined;
 let failSound: UniApp.InnerAudioContext | undefined;
 let bgmMode: 'normal' | 'fast' = 'normal';
 const urgentSeconds = 20;
+const guideSequence: GuideStep[] = ['drag', 'rotate', 'flip'];
+const guideDemoDurations: Record<GuideStep, number> = {
+  drag: 2300,
+  rotate: 2300,
+  flip: 3400,
+};
+const guideFlipPracticeDelay = 760;
 
 const {
   pieces,
@@ -178,6 +196,10 @@ const {
 
 const showDebugMetrics = false;
 const guidePieceId = computed(() => pieces.value.find((piece) => piece.id === 'piece-b')?.id ?? '');
+const canOperateBoard = computed(() =>
+  phase.value === 'playing' ||
+  (phase.value === 'guide' && guideMode.value === 'practice' && !guidePracticeCompleting.value),
+);
 
 const pageStyle = computed(() => ({
   paddingTop: `${navTop}px`,
@@ -189,13 +211,13 @@ const headerStyle = computed(() => ({
 
 const guideText = computed(() => {
   if (guideStep.value === 'drag') {
-    return '按住木块，拖到想放的位置';
+    return '轮到你了，按住木块拖动一次';
   }
   if (guideStep.value === 'flip') {
-    return '轻点木块，可以翻到另一面';
+    return '轮到你了，轻点木块翻面一次';
   }
   if (guideStep.value === 'rotate') {
-    return '按住任意角旋转';
+    return '轮到你了，按住任意角旋转一次';
   }
   return '';
 });
@@ -215,38 +237,60 @@ const guideIconSrc = computed(() => {
 
 function playGuideThenShowStart() {
   phase.value = 'guide';
-  guideStep.value = 'drag';
-  guideMode.value = 'hint';
   clearGuideTimers();
+  showSolvedPreview();
+  startGuideStep('drag');
+}
+
+function startGuideStep(step: GuideStep) {
+  clearGuideTimers();
+  showSolvedPreview();
+  phase.value = 'guide';
+  guideStep.value = step;
+  guideMode.value = 'demo';
+  guidePracticeCompleting.value = false;
   hintTimers = [
     setTimeout(() => {
-      guideMode.value = 'demo';
-    }, 1400),
-    setTimeout(() => {
-      guideStep.value = 'rotate';
-      guideMode.value = 'hint';
-    }, 4600),
-    setTimeout(() => {
-      guideMode.value = 'demo';
-    }, 6000),
-    setTimeout(() => {
-      guideStep.value = 'flip';
-      guideMode.value = 'hint';
-    }, 9200),
-    setTimeout(() => {
-      guideMode.value = 'demo';
-    }, 10600),
-    setTimeout(() => {
-      guideStep.value = 'done';
-      phase.value = 'preview';
-    }, 13800),
+      guideMode.value = 'practice';
+    }, guideDemoDurations[step]),
   ];
+}
+
+function advanceGuideAfterPractice() {
+  guidePracticeCompleting.value = false;
+  if (guideStep.value === 'done') {
+    return;
+  }
+  const currentIndex = guideSequence.indexOf(guideStep.value);
+  const nextStep = guideSequence[currentIndex + 1];
+  if (nextStep) {
+    startGuideStep(nextStep);
+    return;
+  }
+  clearGuideTimers();
+  showSolvedPreview();
+  guideStep.value = 'done';
+  guideMode.value = 'demo';
+  phase.value = 'preview';
+}
+
+function completeGuidePractice() {
+  if (guidePracticeCompleting.value) {
+    return;
+  }
+  guidePracticeCompleting.value = true;
+  if (guideStep.value === 'flip') {
+    hintTimers.push(setTimeout(advanceGuideAfterPractice, guideFlipPracticeDelay));
+    return;
+  }
+  advanceGuideAfterPractice();
 }
 
 function scatterAndStartGame() {
   clearGuideTimers();
   guideStep.value = 'done';
   guideMode.value = 'demo';
+  guidePracticeCompleting.value = false;
   phase.value = 'scattering';
   boardAnimating.value = true;
   startGame({ startTimers: false });
@@ -263,13 +307,18 @@ function scatterAndStartGame() {
 
 function skipGuide() {
   clearGuideTimers();
-  guideStep.value = 'done';
-  guideMode.value = 'hint';
-  phase.value = 'preview';
+  showSolvedPreview();
+  playBgmIfAllowed();
+  scatterAndStartGame();
 }
 
 function updateDebugMetrics() {
   const summary = getAreaSolveSummary(pieces.value, level.value.targets, level.value.tolerance);
+  applyDebugMetrics(summary);
+  return summary;
+}
+
+function applyDebugMetrics(summary: ReturnType<typeof getAreaSolveSummary>) {
   const tolerance = level.value.tolerance;
   debugMetrics.value = {
     overlap: (summary.overlapAreaRatio * 100).toFixed(1),
@@ -282,20 +331,51 @@ function updateDebugMetrics() {
     mismatch: (summary.targetMismatchRatio * 100).toFixed(1),
     mismatchLimit: (tolerance.targetMismatchRatio * 100).toFixed(1),
   };
-  return summary;
 }
 
-function checkAfterPieceOperation(pieceId?: string) {
+function checkAfterPieceOperation(pieceId?: string, action?: GuideAction, meaningful = false) {
   if (pieceId) {
     snapPieceRotation(pieceId);
+  }
+  if (phase.value === 'guide' && guideMode.value === 'practice') {
+    if (
+      pieceId === guidePieceId.value &&
+      action === guideStep.value &&
+      meaningful
+    ) {
+      completeGuidePractice();
+      return;
+    }
+    deactivatePiece();
+    return;
   }
   if (phase.value !== 'playing' || status.value !== 'playing') {
     deactivatePiece();
     return;
   }
-  updateDebugMetrics();
-  checkSolved({ silent: true });
   deactivatePiece();
+  scheduleSolvedCheck();
+}
+
+function scheduleSolvedCheck(delay = 90) {
+  if (solveCheckTimer) {
+    clearTimeout(solveCheckTimer);
+  }
+  solveCheckTimer = setTimeout(() => {
+    solveCheckTimer = undefined;
+    if (phase.value !== 'playing' || status.value !== 'playing') {
+      return;
+    }
+    if (activePieceId.value) {
+      scheduleSolvedCheck(180);
+      return;
+    }
+    const summary = getAreaSolveSummary(pieces.value, level.value.targets, level.value.tolerance);
+    if (showDebugMetrics) {
+      applyDebugMetrics(summary);
+    }
+    checkSolved({ silent: true, summary });
+  }, delay);
 }
 
 function clearGuideTimers() {
@@ -303,26 +383,38 @@ function clearGuideTimers() {
   hintTimers = [];
 }
 
+function clearSolveCheckTimer() {
+  if (solveCheckTimer) {
+    clearTimeout(solveCheckTimer);
+    solveCheckTimer = undefined;
+  }
+}
+
 function restartGame() {
   clearGuideTimers();
+  clearSolveCheckTimer();
   if (boardAnimationTimer) {
     clearTimeout(boardAnimationTimer);
     boardAnimationTimer = undefined;
   }
   boardAnimating.value = false;
-  phase.value = 'guide';
+  guideStep.value = 'done';
+  guideMode.value = 'demo';
+  guidePracticeCompleting.value = false;
+  phase.value = 'preview';
   showSolvedPreview();
-  playGuideThenShowStart();
 }
 
 function startGameWithMusic() {
-  musicEnabled.value = true;
+  clearSolveCheckTimer();
   showSolvedPreview();
-  playBgm();
+  playBgmIfAllowed();
   scatterAndStartGame();
 }
 
 function startGameMuted() {
+  clearSolveCheckTimer();
+  musicMutedByUser.value = true;
   musicEnabled.value = false;
   stopBgm();
   showSolvedPreview();
@@ -330,27 +422,32 @@ function startGameMuted() {
 }
 
 function replayGuide() {
+  clearSolveCheckTimer();
   showSolvedPreview();
   playGuideThenShowStart();
 }
 
 function lowerDifficulty() {
+  clearSolveCheckTimer();
   switchLevel(easyLevel);
   phase.value = 'guide';
   playGuideThenShowStart();
 }
 
-function shareGame() {
-  showToast('点击右上角菜单分享给朋友试试');
+function shareGame(scene: 'success' | 'failed') {
+  showToast(scene === 'success' ? '分享给朋友看看你的手感' : '分享给朋友一起破局');
 }
 
 function toggleMusic() {
-  musicEnabled.value = !musicEnabled.value;
   if (musicEnabled.value) {
-    playBgm();
-  } else {
+    musicMutedByUser.value = true;
+    musicEnabled.value = false;
     stopBgm();
+    return;
   }
+  musicMutedByUser.value = false;
+  musicEnabled.value = true;
+  playBgm();
 }
 
 function ensureBgm() {
@@ -409,14 +506,48 @@ function playBgm() {
   ensureBgm().play();
 }
 
+function playBgmIfAllowed() {
+  if (musicMutedByUser.value) {
+    musicEnabled.value = false;
+    stopBgm();
+    return;
+  }
+  musicEnabled.value = true;
+  playBgm();
+}
+
 function stopBgm() {
   bgm?.pause();
 }
 
-onShareAppMessage(() => ({
-  title: 'T字拼图，来试试你能不能拼出来',
-  path: '/pages/game/index',
-}));
+function getSharePayload(scene?: string) {
+  if (scene === 'success') {
+    return {
+      title: `我用 ${elapsedSeconds.value} 秒解开了 T字之谜`,
+      path: '/pages/game/index',
+      imageUrl: '/static/share/street-challenge.png',
+    };
+  }
+  if (scene === 'failed') {
+    return {
+      title: 'T字之谜：一看就会，一上就废',
+      path: '/pages/game/index',
+      imageUrl: '/static/share/easy-to-fail.png',
+    };
+  }
+  return {
+    title: '四块木块，藏着一个 T字之谜',
+    path: '/pages/game/index',
+    imageUrl: '/static/share/street-challenge.png',
+  };
+}
+
+onShareAppMessage((options) => {
+  const scene = options.from === 'button'
+    ? (options.target?.dataset?.shareScene as string | undefined)
+    : undefined;
+  return getSharePayload(scene);
+});
 
 onMounted(() => {
   playGuideThenShowStart();
@@ -425,8 +556,8 @@ onMounted(() => {
 watch(status, (nextStatus) => {
   if (nextStatus === 'success' || nextStatus === 'failed') {
     const shouldPlayResultSound = musicEnabled.value;
-    musicEnabled.value = false;
     stopBgm();
+    musicEnabled.value = false;
     if (shouldPlayResultSound) {
       playOneShot(nextStatus === 'success' ? ensureSuccessSound() : ensureFailSound());
     }
@@ -441,6 +572,7 @@ watch(remainingSeconds, (seconds) => {
 
 onBeforeUnmount(() => {
   clearGuideTimers();
+  clearSolveCheckTimer();
   if (boardAnimationTimer) {
     clearTimeout(boardAnimationTimer);
   }
@@ -456,7 +588,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   min-height: 100vh;
   padding-right: 20px;
-  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
   padding-left: 20px;
   overflow: hidden;
   background:
@@ -520,6 +652,8 @@ onBeforeUnmount(() => {
 
 .toolbar {
   flex-shrink: 0;
+  margin-top: -2px;
+  margin-bottom: 14px;
 }
 
 .play-area {
@@ -528,6 +662,12 @@ onBeforeUnmount(() => {
   justify-content: center;
   min-height: 0;
   flex: 1;
+}
+
+.ad-reserved {
+  width: 100%;
+  height: 64px;
+  flex-shrink: 0;
 }
 
 .start-panel {
@@ -667,7 +807,7 @@ onBeforeUnmount(() => {
 .operation-hint {
   position: fixed;
   left: 50%;
-  top: 50%;
+  top: 62%;
   z-index: 13000;
   display: flex;
   flex-direction: column;
@@ -689,6 +829,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   transform: translate(-50%, -50%);
   animation: hint-pop 0.22s ease-out;
+  pointer-events: none;
 }
 
 .hint-icon-image {
@@ -723,14 +864,18 @@ onBeforeUnmount(() => {
 @media (max-width: 520px) {
   .page {
     padding-right: 12px;
-    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
     padding-left: 12px;
   }
 
   .header {
     gap: 8px;
-    margin-bottom: 7px;
+    margin-bottom: 5px;
     padding: 0 2px;
+  }
+
+  .toolbar {
+    margin-bottom: 12px;
   }
 
   .logo {
@@ -752,6 +897,10 @@ onBeforeUnmount(() => {
   .start-panel {
     width: 88%;
     padding: 14px;
+  }
+
+  .ad-reserved {
+    height: 58px;
   }
 
   .start-title {

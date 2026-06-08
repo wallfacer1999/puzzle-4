@@ -134,7 +134,7 @@ function getBestTranslatedTargetMatch(
     x: (targetBounds.minX + targetBounds.maxX - pieceBounds.minX - pieceBounds.maxX) / 2,
     y: (targetBounds.minY + targetBounds.maxY - pieceBounds.minY - pieceBounds.maxY) / 2,
   };
-  const offsets = radius > 0 ? [-radius, -radius / 2, 0, radius / 2, radius] : [0];
+  const offsets = radius > 0 ? [-radius, 0, radius] : [0];
   let best = {
     outsideAreaRatio: 1,
     uncoveredAreaRatio: 1,

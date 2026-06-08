@@ -6,3 +6,10 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+tmp/
+docs/app-store/source-assets/
+docs/app-store/wood-grain-source.png
+docs/soft-copyright/*.html
+docs/soft-copyright/*.pdf
+docs/soft-copyright/*.png
+docs/soft-copyright/signature-assets/

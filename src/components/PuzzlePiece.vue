@@ -1,7 +1,7 @@
 <template>
   <view
     class="piece"
-    :class="{ active, flipped: piece.flipped, 'position-animate': flipAnimating, 'layout-animate': animateLayout }"
+    :class="{ active, flipped: piece.flipped, 'overlap-shadow': overlapShadow, 'position-animate': flipAnimating, 'layout-animate': animateLayout }"
     :style="pieceStyle"
     @mousemove.stop="moveActiveGesture"
     @mouseup.stop="endActiveGesture"
@@ -95,6 +95,7 @@ const props = defineProps<{
   active: boolean;
   disabled: boolean;
   animateLayout: boolean;
+  overlapShadow: boolean;
   showControls: boolean;
   guideActive: boolean;
   guideStep: 'drag' | 'flip' | 'rotate' | 'done';
@@ -225,7 +226,9 @@ const innerDisplayPolygon = computed(() =>
   polygonToCss(shrinkVertices(displayVertices.value, 4 / props.scale)),
 );
 
-const showOutline = computed(() => !props.piece.texture);
+const showOutline = computed(() =>
+  props.active || (props.guideActive && props.guideStep !== 'done'),
+);
 
 function polygonToCss(vertices: { x: number; y: number }[]) {
   return vertices
@@ -477,6 +480,10 @@ watch(
   filter: drop-shadow(0 10px 10px rgba(29, 36, 51, 0.2));
 }
 
+.piece.overlap-shadow:not(.active) .flip-layer {
+  filter: drop-shadow(0 5px 5px rgba(30, 36, 38, 0.32));
+}
+
 .piece-outline {
   position: absolute;
   inset: 0;
@@ -513,8 +520,8 @@ watch(
 
 .rotate-handle {
   position: absolute;
-  width: 34px;
-  height: 34px;
+  width: 72px;
+  height: 72px;
   border: 0;
   border-radius: 50%;
   background: transparent;
@@ -523,8 +530,8 @@ watch(
 }
 
 .rotate-handle.visible {
-  border: 3px solid rgba(255, 255, 255, 0.88);
-  background: rgba(29, 36, 51, 0.22);
+  border: 3px solid rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.16);
 }
 
 .guide-layer.guide-drag {
