@@ -3,7 +3,7 @@
     {
       "path": "pages/game/index",
       "style": {
-        "navigationBarTitleText": "四块拼图",
+        "navigationBarTitleText": "T字之谜",
         "navigationStyle": "custom"
       }
     }
@@ -12,6 +12,6 @@
   "globalStyle": {
     "backgroundColor": "#f4f1ea",
     "navigationBarTextStyle": "black",
-    "navigationBarTitleText": "四块拼图"
+    "navigationBarTitleText": "T字之谜"
   }
 }

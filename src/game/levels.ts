@@ -1,9 +1,11 @@
 import type { LevelConfig, PieceTemplate, Point, TargetPieceState } from './types';
 
 const unitScale = 7;
+const boardWidth = 750;
+const boardHeight = 1240;
 const targetOrigin = {
-  x: 375 - (79.2 * unitScale) / 2,
-  y: 500 - (107.2 * unitScale) / 2,
+  x: boardWidth / 2 - (79.2 * unitScale) / 2,
+  y: boardHeight / 2 - (107.2 * unitScale) / 2,
 };
 
 type ExactPieceSpec = {
@@ -138,7 +140,7 @@ function toPiece(spec: ExactPieceSpec, index: number, difficulty: LevelConfig['d
     id: spec.id,
     color: difficulty === 'easy' ? easyColors[index] : woodColor,
     texture: difficulty === 'easy',
-    textureUrl: difficulty === 'normal' ? '/static/textures/wood-grain.png' : undefined,
+    textureUrl: difficulty === 'normal' ? '/static/textures/wood-grain.jpg' : undefined,
     width: (bounds.maxX - bounds.minX) * unitScale,
     height: (bounds.maxY - bounds.minY) * unitScale,
     polygon: toPolygon(spec.points),
@@ -164,8 +166,8 @@ function createLevel(difficulty: LevelConfig['difficulty']): LevelConfig {
     name: difficulty === 'easy' ? '简单版' : '默认挑战',
     difficulty,
     showTarget: difficulty === 'easy',
-    boardWidth: 750,
-    boardHeight: 1000,
+    boardWidth,
+    boardHeight,
     timeLimitSeconds: 99,
     countdownEnabled: true,
     pieces: exactPieceSpecs.map((spec, index) => toPiece(spec, index, difficulty)),
@@ -179,7 +181,7 @@ function createLevel(difficulty: LevelConfig['difficulty']): LevelConfig {
       overlapAreaRatio: 0.018,
       uncoveredAreaRatio: 0.08,
       targetMismatchRatio: 0.08,
-      areaSampleStep: 5,
+      areaSampleStep: 8,
       translationSearchRadius: 18,
     },
   };
